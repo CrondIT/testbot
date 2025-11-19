@@ -1,6 +1,4 @@
 import os
-import requests
-import base64
 from dotenv import load_dotenv
 from openai import OpenAI
 from telegram import Update
@@ -34,29 +32,22 @@ user_edit_data = {}  # Хранит данные для редактирован
 MAX_CONTEXT_MESSAGES = 10
 
 
-def is_search_query(text: str) -> bool:
-    """Проверяет, нужно ли искать в интернете."""
-    search_keywords = ["найди", "поиск", "найди в интернете", "поищи", "поищи в интернете", "search", "find"]
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in search_keywords)
-
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user_id = update.effective_user.id
     user_modes[user_id] = "chat"  # Устанавливаем режим по умолчанию
-    
-    welcome_text = """
-🤖 Добро пожаловать в мульти-режимного бота!
+    welcome_text = f"""
+        🤖 Добро пожаловать в мульти-режимного бота!
+        Ваш ID: {user_id}
 
-Доступные команды:
-/ai - Чат с ИИ (OpenAI)
-/ai_internet - ИИ с поиском в интернете
-/ai_image - Генерация изображений (DALL-E)
-/ai_edit - Редактирование изображений (Gemini 2.5 Flash)
+        Доступные команды:
+        /ai - Чат с ИИ (OpenAI)
+        /ai_internet - ИИ с поиском в интернете
+        /ai_image - Генерация изображений
+        /ai_edit - Редактирование изображений
 
-Выберите режим и начните общение!
-    """
+        Выберите режим и начните общение!
+        """
     await update.message.reply_text(welcome_text)
 
 
@@ -64,40 +55,50 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима обычного чата"""
     user_id = update.effective_user.id
     user_modes[user_id] = "chat"
-    
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
-    
     if "chat" not in user_contexts[user_id]:
         user_contexts[user_id]["chat"] = [
-            {"role": "system", "content": "Ты дружелюбный Telegram-бот, отвечай понятно и по существу."}
+            {"role": "system",
+             "content": (
+                "Ты дружелюбный Telegram-бот, "
+                "отвечай понятно и по существу."
+                )
+             }
         ]
-    
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
-    
-    await update.message.reply_text("🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!")
+    await update.message.reply_text(
+        "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
+        )
 
 
-async def ai_internet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ai_internet_command(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+        ):
     """Активация режима поиска в интернете"""
     user_id = update.effective_user.id
     user_modes[user_id] = "internet"
-    
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
-    
     if "internet" not in user_contexts[user_id]:
         user_contexts[user_id]["internet"] = [
-            {"role": "system", "content": "Ты помощник, который ищет информацию в интернете и предоставляет актуальные данные."}
+            {
+                "role": "system",
+                "content": (
+                    "Ты помощник, который ищет информацию в интернете "
+                    "и предоставляет актуальные данные."
+                )
+            }
         ]
-    
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
-    
-    await update.message.reply_text("🌐 Режим поиска в интернете активирован. Задавайте вопросы с поиском!")
+    await update.message.reply_text(
+        "🌐 Режим поиска в интернете активирован. Задавайте вопросы с поиском!"
+        )
 
 
 async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
