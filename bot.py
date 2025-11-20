@@ -13,7 +13,7 @@ import google.generativeai as genai
 load_dotenv()
 
 # Получаем токены для разных режимов
-OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY_CHAT")
+OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
@@ -41,7 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         Ваш ID: {user_id}
 
         Доступные команды:
-        /ai - Чат с ИИ (OpenAI)
+        /ai - Чат с ИИ
         /ai_internet - ИИ с поиском в интернете
         /ai_image - Генерация изображений
         /ai_edit - Редактирование изображений
@@ -102,7 +102,10 @@ async def ai_internet_command(
         )
 
 
-async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def ai_image_command(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+        ):
     """Активация режима генерации изображений"""
     user_id = update.effective_user.id
     user_modes[user_id] = "image"
@@ -138,7 +141,7 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         - "Сделай стиль поп-арт"
         - "Добавь текст 'Hello World' в верхний левый угол"
 
-        📝 Изображение будет автоматически 
+        📝 Изображение будет автоматически
         конвертировано в PNG для лучшего качества.
     """
     await update.message.reply_text(help_text)
@@ -147,16 +150,15 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def download_and_convert_image(
     file_id: str,
     context: ContextTypes.DEFAULT_TYPE
-    ) -> io.BytesIO:
+        ) -> io.BytesIO:
     """
-        Скачивает изображение, конвертирует в PNG 
+        Скачивает изображение, конвертирует в PNG
         и возвращает его в виде BytesIO
     """
     file = await context.bot.get_file(file_id)
     image_data = io.BytesIO()
     await file.download_to_memory(out=image_data)
     image_data.seek(0)
-    
     # Конвертируем изображение в PNG
     try:
         with Image.open(image_data) as img:
@@ -166,11 +168,13 @@ async def download_and_convert_image(
                 background = Image.new('RGB', img.size, (255, 255, 255))
                 if img.mode == 'P':
                     img = img.convert('RGBA')
-                background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                background.paste(
+                    img,
+                    mask=img.split()[-1] if img.mode == 'RGBA' else None
+                    )
                 img = background
             elif img.mode != 'RGB':
                 img = img.convert('RGB')
-            
             # Сохраняем как PNG
             png_data = io.BytesIO()
             img.save(png_data, format='PNG', optimize=True)
@@ -198,32 +202,30 @@ async def generate_image(prompt: str) -> str:
         raise Exception(f"Ошибка генерации изображения: {str(e)}")
 
 
-async def edit_image_with_gemini(original_image: io.BytesIO, prompt: str) -> str:
+async def edit_image_with_gemini(
+        original_image: io.BytesIO,
+        prompt: str
+        ) -> str:
     """Редактирует изображение с помощью Gemini 2.5 Flash"""
     try:
         # Подготовка изображения для Gemini
         original_image.seek(0)
-        
         # Создаем модель Gemini
         model = genai.GenerativeModel('gemini-2.5-flash-image')
-        
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
         Проанализируй это изображение и выполни следующие изменения: {prompt}
-        
         Важные инструкции:
         1. Внеси именно те изменения, которые запрошены пользователем
         2. Сохрани общий стиль и качество изображения
         3. Если запрос неясен, уточни у пользователя
         4. Верни только измененное изображение без дополнительного текста
         """
-        
         # Отправляем изображение и промпт в Gemini
         response = model.generate_content([
             gemini_prompt,
             {"mime_type": "image/png", "data": original_image.getvalue()}
         ])
-        
         # Проверяем, содержит ли ответ изображение
         if hasattr(response, 'candidates') and response.candidates:
             for part in response.candidates[0].content.parts:
@@ -232,13 +234,17 @@ async def edit_image_with_gemini(original_image: io.BytesIO, prompt: str) -> str
                     return part.inline_data.data
                 elif hasattr(part, 'text'):
                     # Если Gemini вернул текст вместо изображения
-                    raise Exception(f"Gemini вернул текстовый ответ вместо изображения: {part.text}")
-        
+                    raise Exception(
+                        f"""
+                        ИИ вернул текстовый ответ вместо изображения:
+                        {part.text}"""
+                        )
         # Если не нашли изображение в ответе
         raise Exception("Gemini не вернул изображение в ответе")
-        
     except Exception as e:
-        raise Exception(f"Ошибка редактирования изображения с помощью Gemini: {str(e)}")
+        raise Exception(
+            f"Ошибка редактирования изображения с помощью ИИ: {str(e)}"
+            )
 
 
 async def save_image_from_data(image_data: bytes, filename: str) -> str:
@@ -259,9 +265,11 @@ async def transcribe_voice(file_path: str) -> str:
     return transcription.text
 
 
-async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message_or_voice(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+        ):
     user_id = update.effective_user.id
-    
     # Если режим не установлен, устанавливаем режим чата по умолчанию
     if user_id not in user_modes:
         user_modes[user_id] = "chat"
@@ -288,7 +296,9 @@ async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_
             os.remove(file_path)
         except Exception as e:
             print("Ошибка транскрибации:", e)
-            await update.message.reply_text("⚠️ Не удалось распознать голосовое сообщение.")
+            await update.message.reply_text(
+                "⚠️ Не удалось распознать голосовое сообщение."
+                )
             return
     elif update.message.text:
         # Обычное текстовое сообщение
@@ -302,7 +312,10 @@ async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("🎨 Генерирую изображение...")
         try:
             image_url = await generate_image(user_message)
-            await update.message.reply_photo(image_url, caption=f"Сгенерировано по запросу: {user_message}")
+            await update.message.reply_photo(
+                image_url,
+                caption=f"Сгенерировано по запросу: {user_message}"
+                )
         except Exception as e:
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
@@ -310,44 +323,69 @@ async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_
     # Инициализация контекста для текущего режима
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
-    
+
     if current_mode not in user_contexts[user_id]:
         if current_mode == "chat":
             user_contexts[user_id][current_mode] = [
-                {"role": "system", "content": "Ты дружелюбный Telegram-бот, отвечай понятно и по существу."}
+                {
+                 "role": "system",
+                 "content": "Ты дружелюбный Telegram-бот, "
+                 "отвечай понятно и по существу."
+                 }
             ]
         else:  # internet mode
             user_contexts[user_id][current_mode] = [
-                {"role": "system", "content": "Ты помощник, который ищет информацию в интернете и предоставляет актуальные данные."}
+                {
+                 "role": "system",
+                 "content": "Ты помощник, который ищет информацию "
+                 "в интернете и предоставляет актуальные данные."
+                 }
             ]
 
     # Для режима internet проверяем необходимость поиска
-    if current_mode == "internet" and is_search_query(user_message):
+    if current_mode == "internet":
         try:
             await update.message.reply_text("🔍 Ищу информацию в интернете...")
-            
             # Выполняем поиск через DuckDuckGo
-            results = DDGS().text(user_message, max_results=3)
+            results = DDGS().text(user_message, max_results=4)
 
             if not results:
-                await update.message.reply_text("❌ Не удалось найти результаты по запросу.")
+                await update.message.reply_text(
+                    "❌ Не удалось найти результаты по запросу."
+                    )
                 return
 
             # Формируем текст из результатов
-            search_content = "\n".join([f"{i+1}. [{r['title']}]({r['href']}): {r['body']}" for i, r in enumerate(results)])
+            search_content = "\n".join([
+                f"{i+1}. [{r['title']}]({r['href']}): {r['body']}"
+                for i, r in enumerate(results)
+            ])
 
             # Подготовим сообщение с результатами для GPT
-            search_prompt = f"""Вот результаты поиска в интернете:\n\n{search_content}\n\nОтветь на запрос пользователя, используя эту информацию: {user_message}"""
+            search_prompt = f"""Вот результаты поиска в интернете:
+                \n\n{search_content}\n\nОтветь на запрос пользователя,
+                используя эту информацию: {user_message}"""
 
             # Формируем сообщения для GPT
-            messages = user_contexts[user_id][current_mode] + [{"role": "user", "content": search_prompt}]
+            messages = (
+                user_contexts[user_id][current_mode] +
+                [{"role": "user", "content": search_prompt}]
+            )
+
         except Exception as e:
             print("Ошибка поиска DuckDuckGo:", e)
-            await update.message.reply_text("⚠️ Не удалось выполнить поиск в интернете.")
+            await update.message.reply_text(
+                "⚠️ Не удалось выполнить поиск в интернете."
+                )
             return
     else:
         # Обычный режим — добавляем сообщение пользователя
-        messages = user_contexts[user_id][current_mode] + [{"role": "user", "content": user_message}]
+        messages = user_contexts[user_id][current_mode] + [
+            {
+             "role": "user",
+             "content": user_message
+             }
+            ]
 
     # Ограничиваем длину истории
     if len(messages) > MAX_CONTEXT_MESSAGES:
@@ -363,10 +401,19 @@ async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_
         reply = response.choices[0].message.content
 
         # Обновляем контекст: добавляем и запрос, и ответ
-        if current_mode == "internet" and is_search_query(user_message):
-            user_contexts[user_id][current_mode].append({"role": "user", "content": user_message})
-        
-        user_contexts[user_id][current_mode].append({"role": "assistant", "content": reply})
+        if current_mode == "internet":
+            user_contexts[user_id][current_mode].append(
+                {
+                 "role": "user",
+                 "content": user_message
+                 }
+            )
+        user_contexts[user_id][current_mode].append(
+            {
+             "role": "assistant",
+             "content": reply
+            }
+        )
 
         await update.message.reply_text(reply, parse_mode="Markdown")
 
@@ -375,53 +422,59 @@ async def handle_message_or_voice(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
 
 
-async def handle_edit_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
+async def handle_edit_mode(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        user_id: int
+        ):
     """Обработчик для режима редактирования изображений с Gemini"""
     edit_data = user_edit_data.get(user_id, {})
-    
     # Если пользователь отправил изображение
     if update.message.photo:
         await update.message.reply_text("🔄 Конвертирую изображение в PNG...")
-        image_data = await download_and_convert_image(update.message.photo[-1].file_id, context)
-        
+        image_data = await download_and_convert_image(
+            update.message.photo[-1].file_id, context
+            )
         if edit_data.get("step") == "waiting_image":
             # Сохраняем исходное изображение
             user_edit_data[user_id]["original_image"] = image_data
             user_edit_data[user_id]["step"] = "waiting_prompt"
             await update.message.reply_text(
-                "✅ Изображение получено и конвертировано в PNG. Теперь опишите, что нужно изменить в изображении (используется Gemini 2.5 Flash)."
+                "✅ Изображение получено и конвертировано в PNG. "
+                "Теперь опишите, что нужно изменить в изображении "
+                "(используется Gemini 2.5 Flash)."
             )
         return
-    
     # Если пользователь отправил текст
     elif update.message.text:
         user_message = update.message.text.strip()
-        
         if edit_data.get("step") == "waiting_prompt":
-            await update.message.reply_text("🔄 Редактирую изображение с помощью Gemini 2.5 Flash...")
-            
+            await update.message.reply_text("🔄 Редактирую изображение...")
             try:
                 original_image = user_edit_data[user_id]["original_image"]
-                
                 # Редактируем изображение с помощью Gemini
-                edited_image_data = await edit_image_with_gemini(original_image, user_message)
-                
+                edited_image_data = await edit_image_with_gemini(
+                    original_image,
+                    user_message
+                    )
                 # Сохраняем изображение во временный файл
-                file_path = await save_image_from_data(edited_image_data, f"edited_{user_id}")
-                
+                file_path = await save_image_from_data(
+                    edited_image_data,
+                    f"edited_{user_id}"
+                    )
                 # Отправляем отредактированное изображение
                 with open(file_path, "rb") as photo:
-                    await update.message.reply_photo(photo, caption=f"Отредактировано по запросу: {user_message}")
-                
+                    await update.message.reply_photo(
+                        photo,
+                        caption=f"Отредактировано по запросу: {user_message}"
+                        )
                 # Удаляем временный файл
                 os.remove(file_path)
-                
                 # Сбрасываем состояние редактирования
                 user_edit_data[user_id] = {
                     "step": "waiting_image",
                     "original_image": None
                 }
-                
             except Exception as e:
                 await update.message.reply_text(f"⚠️ {str(e)}")
                 # Сбрасываем состояние при ошибке
@@ -430,13 +483,15 @@ async def handle_edit_mode(update: Update, context: ContextTypes.DEFAULT_TYPE, u
                     "original_image": None
                 }
             return
-        
         # Если текст отправлен не на том шаге
-        await update.message.reply_text("❌ Сначала отправьте изображение для редактирования.")
+        await update.message.reply_text(
+            "❌ Сначала отправьте изображение для редактирования."
+            )
         return
-    
     # Если пользователь отправил что-то другое
-    await update.message.reply_text("❌ Пожалуйста, отправьте изображение или текст в соответствии с текущим шагом.")
+    await update.message.reply_text(
+        "❌ Пожалуйста, отправьте изображение или текст."
+    )
 
 
 async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -446,13 +501,22 @@ async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_mode = user_modes[user_id]
         if current_mode in user_contexts[user_id]:
             user_contexts[user_id][current_mode] = [
-                {"role": "system", "content": "Контекст очищен. Начните новый разговор."}
+                {
+                    "role": "system",
+                    "content": "Контекст очищен. Начните новый разговор."
+                }
             ]
-            await update.message.reply_text("🧹 Контекст текущего режима очищен!")
+            await update.message.reply_text(
+                "🧹 Контекст текущего режима очищен!"
+                )
         else:
-            await update.message.reply_text("ℹ️ Нет активного контекста для очистки.")
+            await update.message.reply_text(
+                "ℹ️ Нет активного контекста для очистки."
+                )
     else:
-        await update.message.reply_text("ℹ️ Сначала выберите режим работы.")
+        await update.message.reply_text(
+            "ℹ️ Сначала выберите режим работы."
+            )
 
 
 def main():
@@ -478,7 +542,8 @@ def main():
     ))
 
     print("✅ Мульти-режимный бот запущен!")
-    print("Режимы: /ai (OpenAI), /ai_internet, /ai_image (DALL-E), /ai_edit (Gemini)")
+    print("Режимы: /ai (OpenAI), /ai_internet, "
+          "/ai_image (DALL-E), /ai_edit (Gemini)")
     app.run_polling()
 
 
