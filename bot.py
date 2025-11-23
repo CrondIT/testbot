@@ -8,6 +8,7 @@ from ddgs import DDGS
 from PIL import Image
 import io
 import google.generativeai as genai
+import dbbot
 
 # Загрузить переменные из файла .env
 load_dotenv()
@@ -35,10 +36,13 @@ MAX_CONTEXT_MESSAGES = 10
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user_id = update.effective_user.id
+    user = dbbot.get_user(user_id)
+    coins = user['coins'] + user['giftcoins']
+
     user_modes[user_id] = "chat"  # Устанавливаем режим по умолчанию
     welcome_text = f"""
         🤖 Добро пожаловать в мульти-режимного бота!
-        Ваш ID: {user_id}
+        Ваш ID: {user_id}, у Вас {coins} монета
 
         Доступные команды:
         /ai - Чат с ИИ
