@@ -50,6 +50,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         /ai_internet - ИИ с поиском в интернете
         /ai_image - Генерация изображений
         /ai_edit - Редактирование изображений
+        /billing - Управление счетом
 
         Выберите режим и начните общение!
         """

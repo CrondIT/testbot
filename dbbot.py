@@ -177,3 +177,75 @@ def get_user(userid):
     except psycopg2.Error as e:
         print(f"Ошибка при работе с базой данных: {e}")
         return None
+
+
+def add_coins(userid: int, coins_to_add: int) -> bool:
+    """
+    Обновляет количество coins и устанавливает coindate в текущее время
+    для пользователя с заданным userid.
+     Возвращает True при успехе, False — при ошибке.
+    """
+    try:
+        with psycopg2.connect(
+            dbname=DBNAME,
+            user=DBUSER,
+            password=DBPASSWORD,
+            host=DBHOST,
+            port=DBPORT
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET coins = coins + %s,
+                        coindate = %s
+                    WHERE userid = %s;
+                """, (coins_to_add, datetime.now(), userid))
+
+                # Проверим, была ли обновлена хотя бы одна строка
+                if cur.rowcount == 0:
+                    print(f"Пользователь с userid={userid} не найден.")
+                    return False
+
+                conn.commit()
+                print(f"Данные пользователя {userid} успешно обновлены.")
+                return True
+
+    except psycopg2.Error as e:
+        print(f"Ошибка при обновлении данных: {e}")
+        return False
+
+
+def add_giftcoins(userid: int, coins_to_add: int) -> bool:
+    """
+    Обновляет количество coins и устанавливает coindate в текущее время
+    для пользователя с заданным userid.
+     Возвращает True при успехе, False — при ошибке.
+    """
+    try:
+        with psycopg2.connect(
+            dbname=DBNAME,
+            user=DBUSER,
+            password=DBPASSWORD,
+            host=DBHOST,
+            port=DBPORT
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET giftcoins = giftcoins + %s,
+                        giftdate = %s
+                    WHERE userid = %s;
+                """, (coins_to_add, datetime.now(), userid))
+
+                # Проверим, была ли обновлена хотя бы одна строка
+                if cur.rowcount == 0:
+                    print(f"Пользователь с userid={userid} не найден.")
+                    return False
+
+                conn.commit()
+                print(f"Данные пользователя {userid} успешно обновлены.")
+                return True
+
+    except psycopg2.Error as e:
+        print(f"Ошибка при обновлении данных: {e}")
+        return False
