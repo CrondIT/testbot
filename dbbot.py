@@ -14,9 +14,11 @@ DBHOST = os.getenv("POSTGRES_HOST")
 
 
 def create_database():
+
     if not all([DBNAME, DBUSER, DBPASSWORD, DBPORT, DBHOST]):
         print("Ошибка: Не все переменные окружения установлены.")
         return
+
     try:
         # Подключение к существующей базе данных
         conn = psycopg2.connect(
@@ -24,7 +26,8 @@ def create_database():
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
+            client_encoding='utf8'
             )
 
         cur = conn.cursor()
@@ -149,7 +152,7 @@ def get_user(userid):
                 cur.execute("""
                     SELECT id, userid, nickname, startdate, coindate,
                            coins, giftdate, giftcoins
-                    FROM users 
+                    FROM users
                     WHERE userid = %s;
                 """, (userid,)
                 )

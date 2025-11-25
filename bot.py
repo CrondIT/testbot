@@ -1,9 +1,10 @@
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
-from telegram import Update
+from telegram import Update, InlineKeyboardButton
+from telegram import InlineKeyboardMarkup
 from telegram.ext import MessageHandler, ContextTypes, filters, CommandHandler
-from telegram.ext import ApplicationBuilder
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler
 from ddgs import DDGS
 from PIL import Image
 import io
@@ -55,9 +56,80 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text)
 
 
+async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /billing"""
+    user_id = update.effective_user.id
+    user = dbbot.get_user(user_id)
+    coins = user['coins'] + user['giftcoins']
+
+    # Создаём кнопки
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                " 50 монет -  50 ⭐️", callback_data="coins50stars"
+                ),
+            InlineKeyboardButton(
+                "100 монет - 100 ⭐️", callback_data="coins100stars"
+                ),
+            InlineKeyboardButton(
+                "500 монет - 500 ⭐️", callback_data="coins500stars"
+                ),
+        ],
+        [
+            InlineKeyboardButton(
+                " 50 монет -  50 руб.", callback_data="shop"
+                ),
+            InlineKeyboardButton(
+                "100 монет - 100 руб.", callback_data="gift"
+                ),
+            InlineKeyboardButton(
+                "500 монет - 500 руб.", callback_data="promo"
+                ),
+        ],
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    welcome_text = f"""
+        Ваш ID: {user_id}. Ваш баланс: {coins} монет
+
+        Чтобы приобрести монеты выберите нужный вариант ниже:
+        """
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # Подтверждаем нажатие
+
+    data = query.data
+
+    if data == "coins50stars":
+        await query.edit_message_text("💳 Выберите способ пополнения...")
+    elif data == "coins100stars":
+        await query.edit_message_text("📤 Вывод средств пока недоступен.")
+    elif data == "coins500stars":
+        await query.edit_message_text(
+            "📋 История операций:\n- Пополнение: +10 \n- Использовано: -5 ")
+    elif data == "shop":
+        await query.edit_message_text("🛍 Добро пожаловать в магазин!")
+    elif data == "gift":
+        await query.edit_message_text("🎁 Вы уже получили подарок сегодня.")
+    elif data == "promo":
+        await query.edit_message_text(
+            "🔥 Акция: удвойте монеты за 99₽! (в разработке)")
+    else:
+        await query.edit_message_text("Неизвестное действие.")
+
+
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима обычного чата"""
     user_id = update.effective_user.id
+    dbbot.get_user(user_id)
     user_modes[user_id] = "chat"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -84,6 +156,7 @@ async def ai_internet_command(
         ):
     """Активация режима поиска в интернете"""
     user_id = update.effective_user.id
+    dbbot.get_user(user_id)
     user_modes[user_id] = "internet"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -112,6 +185,7 @@ async def ai_image_command(
         ):
     """Активация режима генерации изображений"""
     user_id = update.effective_user.id
+    dbbot.get_user(user_id)
     user_modes[user_id] = "image"
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
@@ -125,6 +199,7 @@ async def ai_image_command(
 async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима редактирования изображений с использованием Gemini"""
     user_id = update.effective_user.id
+    dbbot.get_user(user_id)
     user_modes[user_id] = "edit"
     # Инициализируем данные для редактирования
     user_edit_data[user_id] = {
@@ -532,6 +607,7 @@ def main():
     app.add_handler(CommandHandler("ai_internet", ai_internet_command))
     app.add_handler(CommandHandler("ai_image", ai_image_command))
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
+    app.add_handler(CommandHandler("billing", billing))
     app.add_handler(CommandHandler("clear", clear_context))
 
     # Обрабатываем и текст, и голосовые сообщения
@@ -544,6 +620,9 @@ def main():
     app.add_handler(MessageHandler(
         filters.PHOTO, handle_message_or_voice
     ))
+
+    # Обработчик нажатий на кнопки
+    app.add_handler(CallbackQueryHandler(button_handler))
 
     print("✅ Мульти-режимный бот запущен!")
     print("Режимы: /ai (OpenAI), /ai_internet, "
