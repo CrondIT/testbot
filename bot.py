@@ -1,14 +1,24 @@
 import os
+
 from dotenv import load_dotenv
+
 from openai import OpenAI
+
 from telegram import Update, InlineKeyboardButton
 from telegram import InlineKeyboardMarkup
 from telegram.ext import MessageHandler, ContextTypes, filters, CommandHandler
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, PreCheckoutQueryHandler, MessageHandler as TelegramMessageHandler
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler
+from telegram.ext import PreCheckoutQueryHandler
+from telegram.ext import MessageHandler as TelegramMessageHandler
+
 from ddgs import DDGS
+
 from PIL import Image
+
 import io
+
 import google.generativeai as genai
+
 import dbbot
 
 # Загрузить переменные из файла .env
@@ -78,13 +88,13 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton(
-                " 50 монет -  50 руб.", callback_data="shop"
+                " 50 монет -  50 руб.", callback_data="coins50rub"
                 ),
             InlineKeyboardButton(
-                "100 монет - 100 руб.", callback_data="gift"
+                "100 монет - 100 руб.", callback_data="coins100rub"
                 ),
             InlineKeyboardButton(
-                "500 монет - 500 руб.", callback_data="promo"
+                "500 монет - 500 руб.", callback_data="coins500rub"
                 ),
         ],
     ]
@@ -151,20 +161,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             suggested_tip_amounts=[],
             start_parameter="buy_coins"
         )
-    elif data == "shop":
-        await query.edit_message_text("🛍 Добро пожаловать в магазин!")
-    elif data == "gift":
-        await query.edit_message_text("🎁 Вы уже получили подарок сегодня.")
-    elif data == "promo":
+    elif data == "coins50rub":
+        await query.edit_message_text("Раздел в работе!")
+    elif data == "coins100rub":
+        await query.edit_message_text("Раздел в работе!")
+    elif data == "coins500rub":
         await query.edit_message_text(
-            "🔥 Акция: удвойте монеты за 99₽! (в разработке)")
+            "Раздел в работе!")
     else:
+        await query.edit_message_text(
             "📋 История операций:\n- Пополнение: +10 \n- Использовано: -5 ")
-    elif data == "shop":
-    elif data == "gift":
-    elif data == "promo":
-            "🔥 Акция: удвойте монеты за 99₽! (в разработке)")
-    else:
 
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -639,64 +645,72 @@ async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
 
-async def precheckout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def precheckout_callback(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+        ) -> None:
     """Handle pre-checkout queries for Telegram Stars payments."""
     query = update.pre_checkout_query
-    
+
     # Check if the product is valid (we only accept specific coin packages)
     valid_products = {
         "coins50stars": {"coins": 50, "stars": 50},
         "coins100stars": {"coins": 100, "stars": 100},
         "coins500stars": {"coins": 500, "stars": 500}
     }
-    
+
     if query.invoice_payload in valid_products:
         await query.answer(ok=True)
     else:
         await query.answer(ok=False, error_message="Неверный продукт")
 
 
-async def successful_payment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def successful_payment_callback(
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE
+        ) -> None:
     """Handle successful payments with Telegram Stars."""
     # Get the message with the successful payment
     successful_payment = update.message.successful_payment
-    
+
     # Map invoice payloads to coin amounts
     product_map = {
         "coins50stars": {"coins": 50, "stars": 50},
         "coins100stars": {"coins": 100, "stars": 100},
         "coins500stars": {"coins": 500, "stars": 500}
     }
-    
     # Get user ID from the payment
     user_id = update.effective_user.id
-    
+
     # Check if the invoice payload is valid
     if successful_payment.invoice_payload in product_map:
         product_info = product_map[successful_payment.invoice_payload]
         coins_to_add = product_info["coins"]
         stars_amount = product_info["stars"]
-        
+
         # Add coins to user's account
-        success = dbbot.buy_coins_with_stars(user_id, coins_to_add, stars_amount)
-        
+        success = dbbot.add_coins(user_id, coins_to_add)
+
         if success:
             # Get updated user info
             user_info = dbbot.get_user_coins(user_id)
             total_coins = user_info["total"] if user_info else coins_to_add
-            
+
             # Send success message
             await update.message.reply_text(
-                f"🎉 Поздравляем! Вы успешно приобрели {coins_to_add} монет за {stars_amount} ⭐️ Telegram Stars!\n"
+                f"🎉 Вы приобрели {coins_to_add} монет за {stars_amount} ⭐️ "
+                "Telegram Stars!\n"
                 f"Ваш новый баланс: {total_coins} монет."
             )
         else:
             await update.message.reply_text(
-                "❌ Произошла ошибка при пополнении баланса. Пожалуйста, свяжитесь с поддержкой."
+                "❌ Произошла ошибка при пополнении баланса. "
+                "Пожалуйста, свяжитесь с поддержкой."
             )
     else:
         await update.message.reply_text(
-            "❌ Неизвестный продукт. Пожалуйста, используйте кнопки в меню /billing."
+            "❌ Неизвестный продукт. "
+            "Пожалуйста, используйте кнопки в меню /billing."
         )
 
 
@@ -725,10 +739,14 @@ def main():
 
     # Обработчик нажатий на кнопки
     app.add_handler(CallbackQueryHandler(button_handler))
-    
+
     # Обработчики для платежей через Telegram Stars
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
-    app.add_handler(TelegramMessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment_callback))
+    app.add_handler(TelegramMessageHandler(
+        filters.SUCCESSFUL_PAYMENT,
+        successful_payment_callback
+            )
+        )
 
     print("✅ Мульти-режимный бот запущен!")
     print("Режимы: /ai (OpenAI), /ai_internet, "
