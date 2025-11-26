@@ -249,3 +249,56 @@ def add_giftcoins(userid: int, coins_to_add: int) -> bool:
     except psycopg2.Error as e:
         print(f"Ошибка при обновлении данных: {e}")
         return False
+
+
+def buy_coins_with_stars(userid: int, coins_to_buy: int, stars_amount: int) -> bool:
+    """
+    Покупка монет за Telegram Stars.
+    Обновляет количество coins и устанавливает coindate в текущее время
+    для пользователя с заданным userid.
+    Возвращает True при успехе, False — при ошибке.
+    """
+    try:
+        with psycopg2.connect(
+            dbname=DBNAME,
+            user=DBUSER,
+            password=DBPASSWORD,
+            host=DBHOST,
+            port=DBPORT
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET coins = coins + %s,
+                        coindate = %s
+                    WHERE userid = %s;
+                """, (coins_to_buy, datetime.now(), userid))
+
+                # Проверим, была ли обновлена хотя бы одна строка
+                if cur.rowcount == 0:
+                    print(f"Пользователь с userid={userid} не найден.")
+                    return False
+
+                conn.commit()
+                print(f"Пользователь {userid} купил {coins_to_buy} монет за {stars_amount} звёзд.")
+                return True
+
+    except psycopg2.Error as e:
+        print(f"Ошибка при покупке монет: {e}")
+        return False
+
+
+def get_user_coins(userid: int) -> dict:
+    """
+    Получает количество монет пользователя (обычные + подарочные).
+    Возвращает словарь с информацией о монетах или None, если пользователь не найден.
+    """
+    user_data = get_user(userid)
+    if user_data:
+        return {
+            "coins": user_data["coins"],
+            "giftcoins": user_data["giftcoins"],
+            "total": user_data["coins"] + user_data["giftcoins"],
+            "coindate": user_data["coindate"]
+        }
+    return None
