@@ -1,8 +1,4 @@
-*.pyc
-*~
-__pycache__
-.venv
-venv
-db.sqlite3
-.DS_Store
-.env
+```
+# Backup files
+*.backup
+```
