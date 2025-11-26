@@ -30,7 +30,9 @@ class TokenCounter:
             return len(text) // 4
 
     def count_openai_messages_tokens(
-            self, messages: List[Dict[str, str]], model: str = "gpt-4o-mini"
+            self,
+            messages: List[Dict[str, str]],
+            model: str = "gpt-4o-mini"
             ) -> int:
         """
         Count tokens for a list of messages (with roles) for OpenAI models
