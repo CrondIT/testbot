@@ -20,6 +20,7 @@ import io
 import google.generativeai as genai
 
 import dbbot
+import token_utils
 
 # Загрузить переменные из файла .env
 load_dotenv()
@@ -315,6 +316,16 @@ async def download_and_convert_image(
 
 async def generate_image(prompt: str) -> str:
     """Генерирует изображение с помощью DALL-E"""
+    # Проверяем длину промпта на токены (ограничение для DALL-E)
+    prompt_tokens = token_utils.token_counter.count_openai_tokens(prompt, "dall-e-3")
+    max_tokens = token_utils.get_token_limit("dall-e-3")
+    
+    if prompt_tokens > max_tokens:
+        # Обрезаем промпт до допустимого размера
+        avg_token_size = 4  # средний размер токена в символах
+        max_chars = max_tokens * avg_token_size
+        prompt = prompt[:max_chars]
+    
     try:
         response = client_image.images.generate(
             model="dall-e-3",
@@ -334,10 +345,20 @@ async def edit_image_with_gemini(
         ) -> str:
     """Редактирует изображение с помощью Gemini 2.5 Flash"""
     try:
+        # Проверяем длину промпта на токены
+        prompt_tokens = token_utils.token_counter.estimate_gemini_tokens(prompt)
+        max_tokens = token_utils.get_token_limit("gemini-2.5-flash")
+        
+        if prompt_tokens > max_tokens:
+            # Обрезаем промпт до допустимого размера
+            avg_token_size = 4  # средний размер токена в символах
+            max_chars = max_tokens * avg_token_size
+            prompt = prompt[:max_chars]
+        
         # Подготовка изображения для Gemini
         original_image.seek(0)
         # Создаем модель Gemini
-        model = genai.GenerativeModel('gemini-2.5-flash-image')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
         Проанализируй это изображение и выполни следующие изменения: {prompt}
@@ -513,7 +534,10 @@ async def handle_message_or_voice(
              }
             ]
 
-    # Ограничиваем длину истории
+    # Проверяем и ограничиваем количество токенов
+    messages = token_utils.truncate_messages_for_token_limit(messages, model="gpt-4o-mini", reserve_tokens=1000)
+    
+    # Дополнительно ограничиваем длину истории
     if len(messages) > MAX_CONTEXT_MESSAGES:
         messages = messages[-MAX_CONTEXT_MESSAGES:]
 
