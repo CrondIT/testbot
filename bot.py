@@ -4,12 +4,17 @@ from dotenv import load_dotenv
 
 from openai import OpenAI
 
-from telegram import Update, InlineKeyboardButton
-from telegram import InlineKeyboardMarkup
-from telegram.ext import MessageHandler, ContextTypes, filters, CommandHandler
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler
-from telegram.ext import PreCheckoutQueryHandler
-from telegram.ext import MessageHandler as TelegramMessageHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    MessageHandler,
+    ContextTypes,
+    filters,
+    CommandHandler,
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    PreCheckoutQueryHandler,
+    MessageHandler as TelegramMessageHandler,
+)
 
 from ddgs import DDGS
 
@@ -49,7 +54,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user_id = update.effective_user.id
     user = dbbot.get_user(user_id)
-    coins = user['coins'] + user['giftcoins']
+    coins = user["coins"] + user["giftcoins"]
 
     user_modes[user_id] = "chat"  # Устанавливаем режим по умолчанию
     welcome_text = f"""
@@ -72,31 +77,31 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /billing"""
     user_id = update.effective_user.id
     user = dbbot.get_user(user_id)
-    coins = user['coins'] + user['giftcoins']
+    coins = user["coins"] + user["giftcoins"]
 
     # Создаём кнопки
     keyboard = [
         [
             InlineKeyboardButton(
                 " 50 монет -  50 ⭐️", callback_data="coins50stars"
-                ),
+            ),
             InlineKeyboardButton(
                 "100 монет - 100 ⭐️", callback_data="coins100stars"
-                ),
+            ),
             InlineKeyboardButton(
                 "500 монет - 500 ⭐️", callback_data="coins500stars"
-                ),
+            ),
         ],
         [
             InlineKeyboardButton(
                 " 50 монет -  50 руб.", callback_data="coins50rub"
-                ),
+            ),
             InlineKeyboardButton(
                 "100 монет - 100 руб.", callback_data="coins100rub"
-                ),
+            ),
             InlineKeyboardButton(
                 "500 монет - 500 руб.", callback_data="coins500rub"
-                ),
+            ),
         ],
     ]
 
@@ -108,9 +113,7 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
         Чтобы приобрести монеты выберите нужный вариант ниже:
         """
     await update.message.reply_text(
-        welcome_text,
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        welcome_text, reply_markup=reply_markup, parse_mode="Markdown"
     )
 
 
@@ -132,7 +135,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prices=[{"label": "Монеты", "amount": 50}],  # 50 stars
             max_tip_amount=0,
             suggested_tip_amounts=[],
-            start_parameter="buy_coins"
+            start_parameter="buy_coins",
         )
     elif data == "coins100stars":
         # Send invoice for 100 coins via Telegram Stars
@@ -146,7 +149,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prices=[{"label": "Монеты", "amount": 100}],  # 100 stars
             max_tip_amount=0,
             suggested_tip_amounts=[],
-            start_parameter="buy_coins"
+            start_parameter="buy_coins",
         )
     elif data == "coins500stars":
         # Send invoice for 500 coins via Telegram Stars
@@ -160,18 +163,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prices=[{"label": "Монеты", "amount": 500}],  # 500 stars
             max_tip_amount=0,
             suggested_tip_amounts=[],
-            start_parameter="buy_coins"
+            start_parameter="buy_coins",
         )
     elif data == "coins50rub":
         await query.edit_message_text("Раздел в работе!")
     elif data == "coins100rub":
         await query.edit_message_text("Раздел в работе!")
     elif data == "coins500rub":
-        await query.edit_message_text(
-            "Раздел в работе!")
+        await query.edit_message_text("Раздел в работе!")
     else:
         await query.edit_message_text(
-            "📋 История операций:\n- Пополнение: +10 \n- Использовано: -5 ")
+            "📋 История операций:\n- Пополнение: +10 \n- Использовано: -5 "
+        )
 
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,25 +186,25 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_contexts[user_id] = {}
     if "chat" not in user_contexts[user_id]:
         user_contexts[user_id]["chat"] = [
-            {"role": "system",
-             "content": (
-                "Ты дружелюбный Telegram-бот, "
-                "отвечай понятно и по существу."
-                )
-             }
+            {
+                "role": "system",
+                "content": (
+                    "Ты дружелюбный Telegram-бот, "
+                    "отвечай понятно и по существу."
+                ),
+            }
         ]
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
-        )
+    )
 
 
 async def ai_internet_command(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
-        ):
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     """Активация режима поиска в интернете"""
     user_id = update.effective_user.id
     dbbot.get_user(user_id)
@@ -215,7 +218,7 @@ async def ai_internet_command(
                 "content": (
                     "Ты помощник, который ищет информацию в интернете "
                     "и предоставляет актуальные данные."
-                )
+                ),
             }
         ]
     # Очищаем данные редактирования при смене режима
@@ -224,13 +227,10 @@ async def ai_internet_command(
     await update.message.reply_text(
         "🌐 Режим поиска в интернете активирован. "
         "Задавайте вопросы с поиском!"
-        )
+    )
 
 
-async def ai_image_command(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
-        ):
+async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима генерации изображений"""
     user_id = update.effective_user.id
     dbbot.get_user(user_id)
@@ -241,7 +241,7 @@ async def ai_image_command(
     await update.message.reply_text(
         "🎨 Режим генерации изображений активирован. "
         "Опишите, что вы хотите увидеть!"
-        )
+    )
 
 
 async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -252,7 +252,7 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Инициализируем данные для редактирования
     user_edit_data[user_id] = {
         "step": "waiting_image",  # waiting_image, waiting_prompt
-        "original_image": None
+        "original_image": None,
     }
     help_text = """
         🎭 Режим редактирования изображений активирован!
@@ -275,12 +275,11 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def download_and_convert_image(
-    file_id: str,
-    context: ContextTypes.DEFAULT_TYPE
-        ) -> io.BytesIO:
+    file_id: str, context: ContextTypes.DEFAULT_TYPE
+) -> io.BytesIO:
     """
-        Скачивает изображение, конвертирует в PNG
-        и возвращает его в виде BytesIO
+    Скачивает изображение, конвертирует в PNG
+    и возвращает его в виде BytesIO
     """
     file = await context.bot.get_file(file_id)
     image_data = io.BytesIO()
@@ -290,21 +289,20 @@ async def download_and_convert_image(
     try:
         with Image.open(image_data) as img:
             # Конвертируем в RGB если нужно (для JPEG)
-            if img.mode in ('P', 'RGBA', 'LA'):
+            if img.mode in ("P", "RGBA", "LA"):
                 # Создаем белый фон для изображений с прозрачностью
-                background = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
+                background = Image.new("RGB", img.size, (255, 255, 255))
+                if img.mode == "P":
+                    img = img.convert("RGBA")
                 background.paste(
-                    img,
-                    mask=img.split()[-1] if img.mode == 'RGBA' else None
-                    )
+                    img, mask=img.split()[-1] if img.mode == "RGBA" else None
+                )
                 img = background
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
+            elif img.mode != "RGB":
+                img = img.convert("RGB")
             # Сохраняем как PNG
             png_data = io.BytesIO()
-            img.save(png_data, format='PNG', optimize=True)
+            img.save(png_data, format="PNG", optimize=True)
             png_data.seek(0)
             return png_data
     except Exception as e:
@@ -317,9 +315,9 @@ async def download_and_convert_image(
 async def generate_image(prompt: str) -> str:
     """Генерирует изображение с помощью DALL-E"""
     # Проверяем длину промпта на токены (ограничение для DALL-E)
-    prompt_tokens = (
-        token_utils.token_counter.count_openai_tokens(prompt, "dall-e-3")
-        )
+    prompt_tokens = token_utils.token_counter.count_openai_tokens(
+        prompt, "dall-e-3"
+    )
     max_tokens = token_utils.get_token_limit("dall-e-3")
 
     if prompt_tokens > max_tokens:
@@ -342,15 +340,14 @@ async def generate_image(prompt: str) -> str:
 
 
 async def edit_image_with_gemini(
-        original_image: io.BytesIO,
-        prompt: str
-        ) -> str:
+    original_image: io.BytesIO, prompt: str
+) -> str:
     """Редактирует изображение с помощью Gemini 2.5 Flash"""
     try:
         # Проверяем длину промпта на токены
-        prompt_tokens = (
-            token_utils.token_counter.estimate_gemini_tokens(prompt)
-            )
+        prompt_tokens = token_utils.token_counter.estimate_gemini_tokens(
+            prompt
+        )
         max_tokens = token_utils.get_token_limit("gemini-2.5-flash")
 
         if prompt_tokens > max_tokens:
@@ -362,7 +359,7 @@ async def edit_image_with_gemini(
         # Подготовка изображения для Gemini
         original_image.seek(0)
         # Создаем модель Gemini
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel("gemini-2.5-flash")
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
         Проанализируй это изображение и выполни следующие изменения: {prompt}
@@ -373,29 +370,31 @@ async def edit_image_with_gemini(
         4. Верни только измененное изображение без дополнительного текста
         """
         # Отправляем изображение и промпт в Gemini
-        response = model.generate_content([
-            gemini_prompt,
-            {"mime_type": "image/png", "data": original_image.getvalue()}
-        ])
+        response = model.generate_content(
+            [
+                gemini_prompt,
+                {"mime_type": "image/png", "data": original_image.getvalue()},
+            ]
+        )
         # Проверяем, содержит ли ответ изображение
-        if hasattr(response, 'candidates') and response.candidates:
+        if hasattr(response, "candidates") and response.candidates:
             for part in response.candidates[0].content.parts:
-                if hasattr(part, 'inline_data'):
+                if hasattr(part, "inline_data"):
                     # Возвращаем данные изображения
                     return part.inline_data.data
-                elif hasattr(part, 'text'):
+                elif hasattr(part, "text"):
                     # Если Gemini вернул текст вместо изображения
                     raise Exception(
                         f"""
                         ИИ вернул текстовый ответ вместо изображения:
                         {part.text}"""
-                        )
+                    )
         # Если не нашли изображение в ответе
         raise Exception("Gemini не вернул изображение в ответе")
     except Exception as e:
         raise Exception(
             f"Ошибка редактирования изображения с помощью ИИ: {str(e)}"
-            )
+        )
 
 
 async def save_image_from_data(image_data: bytes, filename: str) -> str:
@@ -411,15 +410,14 @@ async def transcribe_voice(file_path: str) -> str:
     with open(file_path, "rb") as audio_file:
         transcription = client_chat.audio.transcriptions.create(
             model="whisper-1",
-            file=audio_file
+            file=audio_file,
         )
     return transcription.text
 
 
 async def handle_message_or_voice(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
-        ):
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     user_id = update.effective_user.id
     # Если режим не установлен, устанавливаем режим чата по умолчанию
     if user_id not in user_modes:
@@ -449,7 +447,7 @@ async def handle_message_or_voice(
             print("Ошибка транскрибации:", e)
             await update.message.reply_text(
                 "⚠️ Не удалось распознать голосовое сообщение."
-                )
+            )
             return
     elif update.message.text:
         # Обычное текстовое сообщение
@@ -464,9 +462,8 @@ async def handle_message_or_voice(
         try:
             image_url = await generate_image(user_message)
             await update.message.reply_photo(
-                image_url,
-                caption=f"Сгенерировано по запросу: {user_message}"
-                )
+                image_url, caption=f"Сгенерировано по запросу: {user_message}"
+            )
         except Exception as e:
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
@@ -479,18 +476,18 @@ async def handle_message_or_voice(
         if current_mode == "chat":
             user_contexts[user_id][current_mode] = [
                 {
-                 "role": "system",
-                 "content": "Ты дружелюбный Telegram-бот, "
-                 "отвечай понятно и по существу."
-                 }
+                    "role": "system",
+                    "content": "Ты дружелюбный Telegram-бот, "
+                    "отвечай понятно и по существу.",
+                }
             ]
         else:  # internet mode
             user_contexts[user_id][current_mode] = [
                 {
-                 "role": "system",
-                 "content": "Ты помощник, который ищет информацию "
-                 "в интернете и предоставляет актуальные данные."
-                 }
+                    "role": "system",
+                    "content": "Ты помощник, который ищет информацию "
+                    "в интернете и предоставляет актуальные данные.",
+                }
             ]
 
     # Для режима internet проверяем необходимость поиска
@@ -503,14 +500,16 @@ async def handle_message_or_voice(
             if not results:
                 await update.message.reply_text(
                     "❌ Не удалось найти результаты по запросу."
-                    )
+                )
                 return
 
             # Формируем текст из результатов
-            search_content = "\n".join([
-                f"{i+1}. [{r['title']}]({r['href']}): {r['body']}"
-                for i, r in enumerate(results)
-            ])
+            search_content = "\n".join(
+                [
+                    f"{i+1}. [{r['title']}]({r['href']}): {r['body']}"
+                    for i, r in enumerate(results)
+                ]
+            )
 
             # Подготовим сообщение с результатами для GPT
             search_prompt = f"""Вот результаты поиска в интернете:
@@ -518,34 +517,26 @@ async def handle_message_or_voice(
                 используя эту информацию: {user_message}"""
 
             # Формируем сообщения для GPT
-            messages = (
-                user_contexts[user_id][current_mode] +
-                [{"role": "user", "content": search_prompt}]
-            )
+            messages = user_contexts[user_id][current_mode] + [
+                {"role": "user", "content": search_prompt}
+            ]
 
         except Exception as e:
             print("Ошибка поиска DuckDuckGo:", e)
             await update.message.reply_text(
                 "⚠️ Не удалось выполнить поиск в интернете."
-                )
+            )
             return
     else:
         # Обычный режим — добавляем сообщение пользователя
         messages = user_contexts[user_id][current_mode] + [
-            {
-             "role": "user",
-             "content": user_message
-             }
-            ]
+            {"role": "user", "content": user_message}
+        ]
 
     # Проверяем и ограничиваем количество токенов
-    messages = (
-        token_utils.truncate_messages_for_token_limit(
-            messages,
-            model="gpt-4o-mini",
-            reserve_tokens=1000
-            )
-        )
+    messages = token_utils.truncate_messages_for_token_limit(
+        messages, model="gpt-4o-mini", reserve_tokens=1000
+    )
 
     # Дополнительно ограничиваем длину истории
     if len(messages) > MAX_CONTEXT_MESSAGES:
@@ -554,8 +545,7 @@ async def handle_message_or_voice(
     try:
         # Используем клиент чата для обоих текстовых режимов
         response = client_chat.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages
+            model="gpt-4o-mini", messages=messages
         )
 
         reply = response.choices[0].message.content
@@ -563,16 +553,10 @@ async def handle_message_or_voice(
         # Обновляем контекст: добавляем и запрос, и ответ
         if current_mode == "internet":
             user_contexts[user_id][current_mode].append(
-                {
-                 "role": "user",
-                 "content": user_message
-                 }
+                {"role": "user", "content": user_message}
             )
         user_contexts[user_id][current_mode].append(
-            {
-             "role": "assistant",
-             "content": reply
-            }
+            {"role": "assistant", "content": reply}
         )
 
         await update.message.reply_text(reply, parse_mode="Markdown")
@@ -583,10 +567,8 @@ async def handle_message_or_voice(
 
 
 async def handle_edit_mode(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE,
-        user_id: int
-        ):
+    update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int
+):
     """Обработчик для режима редактирования изображений с Gemini"""
     edit_data = user_edit_data.get(user_id, {})
     # Если пользователь отправил изображение
@@ -594,7 +576,7 @@ async def handle_edit_mode(
         await update.message.reply_text("🔄 Конвертирую изображение в PNG...")
         image_data = await download_and_convert_image(
             update.message.photo[-1].file_id, context
-            )
+        )
         if edit_data.get("step") == "waiting_image":
             # Сохраняем исходное изображение
             user_edit_data[user_id]["original_image"] = image_data
@@ -614,39 +596,37 @@ async def handle_edit_mode(
                 original_image = user_edit_data[user_id]["original_image"]
                 # Редактируем изображение с помощью Gemini
                 edited_image_data = await edit_image_with_gemini(
-                    original_image,
-                    user_message
-                    )
+                    original_image, user_message
+                )
                 # Сохраняем изображение во временный файл
                 file_path = await save_image_from_data(
-                    edited_image_data,
-                    f"edited_{user_id}"
-                    )
+                    edited_image_data, f"edited_{user_id}"
+                )
                 # Отправляем отредактированное изображение
                 with open(file_path, "rb") as photo:
                     await update.message.reply_photo(
                         photo,
-                        caption=f"Отредактировано по запросу: {user_message}"
-                        )
+                        caption=f"Отредактировано по запросу: {user_message}",
+                    )
                 # Удаляем временный файл
                 os.remove(file_path)
                 # Сбрасываем состояние редактирования
                 user_edit_data[user_id] = {
                     "step": "waiting_image",
-                    "original_image": None
+                    "original_image": None,
                 }
             except Exception as e:
                 await update.message.reply_text(f"⚠️ {str(e)}")
                 # Сбрасываем состояние при ошибке
                 user_edit_data[user_id] = {
                     "step": "waiting_image",
-                    "original_image": None
+                    "original_image": None,
                 }
             return
         # Если текст отправлен не на том шаге
         await update.message.reply_text(
             "❌ Сначала отправьте изображение для редактирования."
-            )
+        )
         return
     # Если пользователь отправил что-то другое
     await update.message.reply_text(
@@ -663,26 +643,23 @@ async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_contexts[user_id][current_mode] = [
                 {
                     "role": "system",
-                    "content": "Контекст очищен. Начните новый разговор."
+                    "content": "Контекст очищен. Начните новый разговор.",
                 }
             ]
             await update.message.reply_text(
                 "🧹 Контекст текущего режима очищен!"
-                )
+            )
         else:
             await update.message.reply_text(
                 "ℹ️ Нет активного контекста для очистки."
-                )
-    else:
-        await update.message.reply_text(
-            "ℹ️ Сначала выберите режим работы."
             )
+    else:
+        await update.message.reply_text("ℹ️ Сначала выберите режим работы.")
 
 
 async def precheckout_callback(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
-        ) -> None:
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Handle pre-checkout queries for Telegram Stars payments."""
     query = update.pre_checkout_query
 
@@ -690,7 +667,7 @@ async def precheckout_callback(
     valid_products = {
         "coins50stars": {"coins": 50, "stars": 50},
         "coins100stars": {"coins": 100, "stars": 100},
-        "coins500stars": {"coins": 500, "stars": 500}
+        "coins500stars": {"coins": 500, "stars": 500},
     }
 
     if query.invoice_payload in valid_products:
@@ -700,9 +677,8 @@ async def precheckout_callback(
 
 
 async def successful_payment_callback(
-        update: Update,
-        context: ContextTypes.DEFAULT_TYPE
-        ) -> None:
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     """Handle successful payments with Telegram Stars."""
     # Get the message with the successful payment
     successful_payment = update.message.successful_payment
@@ -711,7 +687,7 @@ async def successful_payment_callback(
     product_map = {
         "coins50stars": {"coins": 50, "stars": 50},
         "coins100stars": {"coins": 100, "stars": 100},
-        "coins500stars": {"coins": 500, "stars": 500}
+        "coins500stars": {"coins": 500, "stars": 500},
     }
     # Get user ID from the payment
     user_id = update.effective_user.id
@@ -761,30 +737,30 @@ def main():
     app.add_handler(CommandHandler("clear", clear_context))
 
     # Обрабатываем и текст, и голосовые сообщения
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND, handle_message_or_voice
-    ))
-    app.add_handler(MessageHandler(
-        filters.VOICE, handle_message_or_voice
-    ))
-    app.add_handler(MessageHandler(
-        filters.PHOTO, handle_message_or_voice
-    ))
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND, handle_message_or_voice
+        )
+    )
+    app.add_handler(MessageHandler(filters.VOICE, handle_message_or_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_message_or_voice))
 
     # Обработчик нажатий на кнопки
     app.add_handler(CallbackQueryHandler(button_handler))
 
     # Обработчики для платежей через Telegram Stars
     app.add_handler(PreCheckoutQueryHandler(precheckout_callback))
-    app.add_handler(TelegramMessageHandler(
-        filters.SUCCESSFUL_PAYMENT,
-        successful_payment_callback
-            )
+    app.add_handler(
+        TelegramMessageHandler(
+            filters.SUCCESSFUL_PAYMENT, successful_payment_callback
         )
+    )
 
     print("✅ Мульти-режимный бот запущен!")
-    print("Режимы: /ai (OpenAI), /ai_internet, "
-          "/ai_image (DALL-E), /ai_edit (Gemini)")
+    print(
+        "Режимы: /ai (OpenAI), /ai_internet, "
+        "/ai_image (DALL-E), /ai_edit (Gemini)"
+    )
     app.run_polling()
 
 
