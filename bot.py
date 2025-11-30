@@ -36,6 +36,14 @@ OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 
+# Cost per message
+COST_PER_MESSAGE = {
+    "chat": 1,
+    "internet": 2,
+    "image": 5,
+    "edit": 6,
+}
+
 # Инициализация клиентов OpenAI для разных режимов
 client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
 client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
@@ -43,8 +51,8 @@ client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
 # Инициализация клиента Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Хранилище контекста для каждого пользователя и каждого режима
-user_contexts = {}
+
+user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
 MAX_CONTEXT_MESSAGES = 10
@@ -425,7 +433,34 @@ async def handle_message_or_voice(
 
     current_mode = user_modes[user_id]
 
-    # Обработка режима редактирования изображений
+    # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
+    # Определяем стоимость в зависимости от режима
+    cost = COST_PER_MESSAGE.get(current_mode)
+    print(cost)
+
+    # Получаем данные пользователя
+    user_data = dbbot.get_user(user_id)
+    if not user_data:
+        await update.message.reply_text(
+            "❌ Ошибка: Не удалось получить данные пользователя."
+            )
+        return
+
+    # Считаем общее количество монет
+    total_coins = user_data["coins"] + user_data["giftcoins"]
+ 
+    # Проверяем, хватает ли монет
+    if total_coins < cost:
+        await update.message.reply_text(
+            f"⚠️ У вас недостаточно монет. "
+            f"Стоимость запроса: {cost} монет.\n"
+            f"Ваш баланс: {total_coins} монет.\n"
+            f"Пополните счёт в /billing"
+        )
+        return  # ❌ Прерываем выполнение, если монет не хватает
+    # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
+
+        # Обработка режима редактирования изображений
     if current_mode == "edit":
         await handle_edit_mode(update, context, user_id)
         return
@@ -559,7 +594,23 @@ async def handle_message_or_voice(
             {"role": "assistant", "content": reply}
         )
 
+        # Отправляем ответ
         await update.message.reply_text(reply, parse_mode="Markdown")
+
+        # --- ✅ СПИСЫВАЕМ МОНЕТЫ ПОСЛЕ УСПЕШНОГО ОТВЕТА ---
+        # Если основных монет не хватило — списываем из подарочных
+        remaining_cost = cost
+        if user_data["coins"] >= remaining_cost:
+            dbbot.change_all_coins(user_id, -cost, 0)
+        else:
+            # Сначала списываем с основных
+            remaining_cost -= user_data["coins"]
+            dbbot.change_all_coins(
+                user_id,
+                -user_data["coins"],
+                -remaining_cost
+                )
+        # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
 
     except Exception as e:
         print("Ошибка:", e)
@@ -699,12 +750,12 @@ async def successful_payment_callback(
         stars_amount = product_info["stars"]
 
         # Add coins to user's account
-        success = dbbot.add_coins(user_id, coins_to_add)
+        success = dbbot.change_all_coins(user_id, coins_to_add, 0)
 
         if success:
             # Get updated user info
-            user_info = dbbot.get_user_coins(user_id)
-            total_coins = user_info["total"] if user_info else coins_to_add
+            user_info = dbbot.get_user(user_id)
+            total_coins = user_info["coins"] + user_info["giftcoins"]
 
             # Send success message
             await update.message.reply_text(

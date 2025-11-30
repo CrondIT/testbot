@@ -179,7 +179,7 @@ def get_user(userid):
         return None
 
 
-def add_coins(userid: int, coins_to_add: int) -> bool:
+def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
     """
     Обновляет количество coins и устанавливает coindate в текущее время
     для пользователя с заданным userid.
@@ -197,9 +197,10 @@ def add_coins(userid: int, coins_to_add: int) -> bool:
                 cur.execute("""
                     UPDATE users
                     SET coins = coins + %s,
+                        giftcoins = giftcoins + %s,
                         coindate = %s
                     WHERE userid = %s;
-                """, (coins_to_add, datetime.now(), userid))
+                """, (coins, giftcoins, datetime.now(), userid))
 
                 # Проверим, была ли обновлена хотя бы одна строка
                 if cur.rowcount == 0:
@@ -213,56 +214,3 @@ def add_coins(userid: int, coins_to_add: int) -> bool:
     except psycopg2.Error as e:
         print(f"Ошибка при обновлении данных: {e}")
         return False
-
-
-def add_giftcoins(userid: int, coins_to_add: int) -> bool:
-    """
-    Обновляет количество coins и устанавливает coindate в текущее время
-    для пользователя с заданным userid.
-     Возвращает True при успехе, False — при ошибке.
-    """
-    try:
-        with psycopg2.connect(
-            dbname=DBNAME,
-            user=DBUSER,
-            password=DBPASSWORD,
-            host=DBHOST,
-            port=DBPORT
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE users
-                    SET giftcoins = giftcoins + %s,
-                        giftdate = %s
-                    WHERE userid = %s;
-                """, (coins_to_add, datetime.now(), userid))
-
-                # Проверим, была ли обновлена хотя бы одна строка
-                if cur.rowcount == 0:
-                    print(f"Пользователь с userid={userid} не найден.")
-                    return False
-
-                conn.commit()
-                print(f"Данные пользователя {userid} успешно обновлены.")
-                return True
-
-    except psycopg2.Error as e:
-        print(f"Ошибка при обновлении данных: {e}")
-        return False
-
-
-def get_user_coins(userid: int) -> dict:
-    """
-    Получает количество монет пользователя (обычные + подарочные).
-    Возвращает словарь с информацией о монетах или None,
-    если пользователь не найден.
-    """
-    user_data = get_user(userid)
-    if user_data:
-        return {
-            "coins": user_data["coins"],
-            "giftcoins": user_data["giftcoins"],
-            "total": user_data["coins"] + user_data["giftcoins"],
-            "coindate": user_data["coindate"]
-        }
-    return None
