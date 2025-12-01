@@ -27,15 +27,16 @@ def create_database():
             password=DBPASSWORD,
             host=DBHOST,
             port=DBPORT,
-            client_encoding='utf8'
-            )
+            client_encoding="utf8",
+        )
 
         cur = conn.cursor()
 
-        # Выполнение SQL-запроса
+        # Создание таблицы users
         cur.execute("SELECT version();")
         version = cur.fetchone()
-        cur.execute('''
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             userid INTEGER UNIQUE NOT NULL,
@@ -46,11 +47,25 @@ def create_database():
             giftdate TIMESTAMP,
             giftcoins INTEGER
             );
-        ''')
-        conn.commit()
+        """
+        )
 
-        # Получение результата запроса
-        print(version)
+        # ✅ Создание таблицы logs с внешним ключом
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS logs (
+            id SERIAL PRIMARY KEY,
+            userid BIGINT NOT NULL,
+            datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            text TEXT NOT NULL,
+            balance INTEGER,
+            FOREIGN KEY (userid) REFERENCES users (userid) ON DELETE CASCADE
+            );
+        """
+        )
+
+        conn.commit()
+        print("✅ Таблицы 'users' и 'logs' созданы или существуют. ", version)
         cur.close()
         conn.close()
 
@@ -71,14 +86,13 @@ def check_user(userid):
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
         ) as conn:
             with conn.cursor() as cur:
                 # Выполняем запрос: проверяем, есть ли запись с таким userid
                 cur.execute(
-                    "SELECT 1 FROM users WHERE userid = %s LIMIT 1;",
-                    (userid,)
-                    )
+                    "SELECT 1 FROM users WHERE userid = %s LIMIT 1;", (userid,)
+                )
                 result = cur.fetchone()
                 # Если вернулась хотя бы одна строка — пользователь существует
                 return result is not None
@@ -100,7 +114,7 @@ def create_user(userid, nickname, coins, giftcoins):
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
         ) as conn:
             with conn.cursor() as cur:
                 # Текущее время
@@ -115,7 +129,7 @@ def create_user(userid, nickname, coins, giftcoins):
                         )
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (userid, now, now, now, nickname, coins, giftcoins)
+                    (userid, now, now, now, nickname, coins, giftcoins),
                 )
                 conn.commit()
                 print(f"Пользователь {userid} успешно создан.")
@@ -145,16 +159,18 @@ def get_user(userid):
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
         ) as conn:
             with conn.cursor() as cur:
                 # Выполняем запрос
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT id, userid, nickname, startdate, coindate,
                            coins, giftdate, giftcoins
                     FROM users
                     WHERE userid = %s;
-                """, (userid,)
+                """,
+                    (userid,),
                 )
 
                 row = cur.fetchone()
@@ -169,7 +185,7 @@ def get_user(userid):
                         "coindate": row[4],
                         "coins": row[5],
                         "giftdate": row[6],
-                        "giftcoins": row[7]
+                        "giftcoins": row[7],
                     }
                 else:
                     return None  # Пользователь не найден
@@ -181,7 +197,8 @@ def get_user(userid):
 
 def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
     """
-    Обновляет количество coins и устанавливает coindate в текущее время
+    Обновляет количество coins giftcoins
+    и устанавливает coindate в текущее время
     для пользователя с заданным userid.
     Возвращает True при успехе, False — при ошибке.
     """
@@ -191,16 +208,19 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
         ) as conn:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE users
                     SET coins = coins + %s,
                         giftcoins = giftcoins + %s,
                         coindate = %s
                     WHERE userid = %s;
-                """, (coins, giftcoins, datetime.now(), userid))
+                """,
+                    (coins, giftcoins, datetime.now(), userid),
+                )
 
                 # Проверим, была ли обновлена хотя бы одна строка
                 if cur.rowcount == 0:
@@ -214,3 +234,32 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
     except psycopg2.Error as e:
         print(f"Ошибка при обновлении данных: {e}")
         return False
+
+
+def log_action(userid, text, balance):
+    """
+    Добавляет запись в таблицу logs.
+    :param userid: ID пользователя
+    :param text: Текст действия (например, "Запрос к ИИ",
+    "Генерация изображения")
+    """
+    try:
+        with psycopg2.connect(
+            dbname=DBNAME,
+            user=DBUSER,
+            password=DBPASSWORD,
+            host=DBHOST,
+            port=DBPORT
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO logs (userid, text, balance)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (userid, text, balance)
+                )
+                conn.commit()
+                print(f"Лог записан для userid={userid}: {text}")
+    except psycopg2.Error as e:
+        print(f"Ошибка при записи в лог: {e}")

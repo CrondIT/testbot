@@ -115,6 +115,9 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    log_text = "Пользователь выбрал /billing"
+    dbbot.log_action(user_id, log_text, 0)
+
     welcome_text = f"""
         Ваш ID: {user_id}. Ваш баланс: {coins} монет
 
@@ -205,6 +208,9 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал режим /ai (chat)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
     )
@@ -232,6 +238,9 @@ async def ai_internet_command(
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_internet (internet)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🌐 Режим поиска в интернете активирован. "
         "Задавайте вопросы с поиском!"
@@ -246,6 +255,9 @@ async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_image (image)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🎨 Режим генерации изображений активирован. "
         "Опишите, что вы хотите увидеть!"
@@ -279,6 +291,9 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         📝 Изображение будет автоматически
         конвертировано в PNG для лучшего качества.
     """
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_edit (edit)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(help_text)
 
 
@@ -448,9 +463,15 @@ async def handle_message_or_voice(
 
     # Считаем общее количество монет
     total_coins = user_data["coins"] + user_data["giftcoins"]
- 
     # Проверяем, хватает ли монет
     if total_coins < cost:
+        # LOGGING ====================
+        log_text = f""" У пользователя недостаточно средств
+            Режим: {current_mode}
+            Стоимость: {cost}
+            Баланс: {total_coins}
+            """
+        dbbot.log_action(user_id, log_text, 0)
         await update.message.reply_text(
             f"⚠️ У вас недостаточно монет. "
             f"Стоимость запроса: {cost} монет.\n"
@@ -479,6 +500,9 @@ async def handle_message_or_voice(
             # Удаляем временный файл
             os.remove(file_path)
         except Exception as e:
+            # LOGGING ====================
+            log_text = ("Не удалось распознать голосовое сообщение.")
+            dbbot.log_action(user_id, log_text, 0)
             print("Ошибка транскрибации:", e)
             await update.message.reply_text(
                 "⚠️ Не удалось распознать голосовое сообщение."
@@ -611,7 +635,11 @@ async def handle_message_or_voice(
                 -remaining_cost
                 )
         # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
-
+        # LOGGING ====================
+        log_text = f""" Запрос: {user_message}
+            Ответ: {reply}
+            """
+        dbbot.log_action(user_id, log_text, cost)
     except Exception as e:
         print("Ошибка:", e)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
@@ -751,12 +779,20 @@ async def successful_payment_callback(
 
         # Add coins to user's account
         success = dbbot.change_all_coins(user_id, coins_to_add, 0)
-
+        # LOGGING ====================
+        log_text = f""" Попытка приобретения монет {coins_to_add}
+            за звезды {stars_amount}"""
+        dbbot.log_action(user_id, log_text, coins_to_add)
         if success:
             # Get updated user info
             user_info = dbbot.get_user(user_id)
             total_coins = user_info["coins"] + user_info["giftcoins"]
-
+            # LOGGING ====================
+            log_text = f""" Успешно приобретены монеты {coins_to_add}
+                за звезды {stars_amount}
+                Баланс монет: {total_coins}
+                """
+            dbbot.log_action(user_id, log_text, coins_to_add)
             # Send success message
             await update.message.reply_text(
                 f"🎉 Вы приобрели {coins_to_add} монет за {stars_amount} ⭐️ "
