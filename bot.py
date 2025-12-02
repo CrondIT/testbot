@@ -36,6 +36,14 @@ OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 
+# Cost per message
+COST_PER_MESSAGE = {
+    "chat": 1,
+    "internet": 2,
+    "image": 5,
+    "edit": 6,
+}
+
 # Инициализация клиентов OpenAI для разных режимов
 client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
 client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
@@ -43,8 +51,8 @@ client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
 # Инициализация клиента Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Хранилище контекста для каждого пользователя и каждого режима
-user_contexts = {}
+
+user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
 MAX_CONTEXT_MESSAGES = 10
@@ -106,6 +114,9 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
+
+    log_text = "Пользователь выбрал /billing"
+    dbbot.log_action(user_id, log_text, 0)
 
     welcome_text = f"""
         Ваш ID: {user_id}. Ваш баланс: {coins} монет
@@ -197,6 +208,9 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал режим /ai (chat)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
     )
@@ -224,6 +238,9 @@ async def ai_internet_command(
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_internet (internet)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🌐 Режим поиска в интернете активирован. "
         "Задавайте вопросы с поиском!"
@@ -238,6 +255,9 @@ async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_image (image)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(
         "🎨 Режим генерации изображений активирован. "
         "Опишите, что вы хотите увидеть!"
@@ -271,6 +291,9 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         📝 Изображение будет автоматически
         конвертировано в PNG для лучшего качества.
     """
+    # LOGGING ====================
+    log_text = "Пользователь выбрал /ai_edit (edit)"
+    dbbot.log_action(user_id, log_text, 0)
     await update.message.reply_text(help_text)
 
 
@@ -425,7 +448,40 @@ async def handle_message_or_voice(
 
     current_mode = user_modes[user_id]
 
-    # Обработка режима редактирования изображений
+    # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
+    # Определяем стоимость в зависимости от режима
+    cost = COST_PER_MESSAGE.get(current_mode)
+    print(cost)
+
+    # Получаем данные пользователя
+    user_data = dbbot.get_user(user_id)
+    if not user_data:
+        await update.message.reply_text(
+            "❌ Ошибка: Не удалось получить данные пользователя."
+            )
+        return
+
+    # Считаем общее количество монет
+    total_coins = user_data["coins"] + user_data["giftcoins"]
+    # Проверяем, хватает ли монет
+    if total_coins < cost:
+        # LOGGING ====================
+        log_text = f""" У пользователя недостаточно средств
+            Режим: {current_mode}
+            Стоимость: {cost}
+            Баланс: {total_coins}
+            """
+        dbbot.log_action(user_id, log_text, 0)
+        await update.message.reply_text(
+            f"⚠️ У вас недостаточно монет. "
+            f"Стоимость запроса: {cost} монет.\n"
+            f"Ваш баланс: {total_coins} монет.\n"
+            f"Пополните счёт в /billing"
+        )
+        return  # ❌ Прерываем выполнение, если монет не хватает
+    # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
+
+        # Обработка режима редактирования изображений
     if current_mode == "edit":
         await handle_edit_mode(update, context, user_id)
         return
@@ -444,6 +500,9 @@ async def handle_message_or_voice(
             # Удаляем временный файл
             os.remove(file_path)
         except Exception as e:
+            # LOGGING ====================
+            log_text = ("Не удалось распознать голосовое сообщение.")
+            dbbot.log_action(user_id, log_text, 0)
             print("Ошибка транскрибации:", e)
             await update.message.reply_text(
                 "⚠️ Не удалось распознать голосовое сообщение."
@@ -559,8 +618,28 @@ async def handle_message_or_voice(
             {"role": "assistant", "content": reply}
         )
 
+        # Отправляем ответ
         await update.message.reply_text(reply, parse_mode="Markdown")
 
+        # --- ✅ СПИСЫВАЕМ МОНЕТЫ ПОСЛЕ УСПЕШНОГО ОТВЕТА ---
+        # Если основных монет не хватило — списываем из подарочных
+        remaining_cost = cost
+        if user_data["coins"] >= remaining_cost:
+            dbbot.change_all_coins(user_id, -cost, 0)
+        else:
+            # Сначала списываем с основных
+            remaining_cost -= user_data["coins"]
+            dbbot.change_all_coins(
+                user_id,
+                -user_data["coins"],
+                -remaining_cost
+                )
+        # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
+        # LOGGING ====================
+        log_text = f""" Запрос: {user_message}
+            Ответ: {reply}
+            """
+        dbbot.log_action(user_id, log_text, cost)
     except Exception as e:
         print("Ошибка:", e)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
@@ -699,13 +778,21 @@ async def successful_payment_callback(
         stars_amount = product_info["stars"]
 
         # Add coins to user's account
-        success = dbbot.add_coins(user_id, coins_to_add)
-
+        success = dbbot.change_all_coins(user_id, coins_to_add, 0)
+        # LOGGING ====================
+        log_text = f""" Попытка приобретения монет {coins_to_add}
+            за звезды {stars_amount}"""
+        dbbot.log_action(user_id, log_text, coins_to_add)
         if success:
             # Get updated user info
-            user_info = dbbot.get_user_coins(user_id)
-            total_coins = user_info["total"] if user_info else coins_to_add
-
+            user_info = dbbot.get_user(user_id)
+            total_coins = user_info["coins"] + user_info["giftcoins"]
+            # LOGGING ====================
+            log_text = f""" Успешно приобретены монеты {coins_to_add}
+                за звезды {stars_amount}
+                Баланс монет: {total_coins}
+                """
+            dbbot.log_action(user_id, log_text, coins_to_add)
             # Send success message
             await update.message.reply_text(
                 f"🎉 Вы приобрели {coins_to_add} монет за {stars_amount} ⭐️ "
