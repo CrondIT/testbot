@@ -57,7 +57,9 @@ def create_database():
             id SERIAL PRIMARY KEY,
             userid BIGINT NOT NULL,
             datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            mode VARCHAR(20),
             text TEXT NOT NULL,
+            cost INTEGER,
             balance INTEGER,
             FOREIGN KEY (userid) REFERENCES users (userid) ON DELETE CASCADE
             );
@@ -236,7 +238,7 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
         return False
 
 
-def log_action(userid, text, balance):
+def log_action(userid, mode, text, cost, balance):
     """
     Добавляет запись в таблицу logs.
     :param userid: ID пользователя
@@ -254,10 +256,10 @@ def log_action(userid, text, balance):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO logs (userid, text, balance)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO logs (userid, mode, text, cost, balancee)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
-                    (userid, text, balance)
+                    (userid, mode, text, cost, balance)
                 )
                 conn.commit()
                 print(f"Лог записан для userid={userid}: {text}")
