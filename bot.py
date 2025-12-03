@@ -85,7 +85,7 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /billing"""
     user_id = update.effective_user.id
     user = dbbot.get_user(user_id)
-    coins = user["coins"] + user["giftcoins"]
+    balance = user["coins"] + user["giftcoins"]
 
     # Создаём кнопки
     keyboard = [
@@ -114,12 +114,12 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    log_text = "Пользователь выбрал /billing"
-    dbbot.log_action(user_id, log_text, 0)
+    # LOGGING ====================
+    log_text = "Пользователь выбрал режим billing"
+    dbbot.log_action(user_id, "billing", log_text, 0, balance)
 
     welcome_text = f"""
-        Ваш ID: {user_id}. Ваш баланс: {coins} монет
+        Ваш ID: {user_id}. Ваш баланс: {balance} монет
 
         Чтобы приобрести монеты выберите нужный вариант ниже:
         """
@@ -191,7 +191,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима обычного чата"""
     user_id = update.effective_user.id
-    dbbot.get_user(user_id)
+    user = dbbot.get_user(user_id)
+    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "chat"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -209,8 +210,8 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     # LOGGING ====================
-    log_text = "Пользователь выбрал режим /ai (chat)"
-    dbbot.log_action(user_id, log_text, 0)
+    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
+    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
     )
@@ -221,7 +222,8 @@ async def ai_internet_command(
 ):
     """Активация режима поиска в интернете"""
     user_id = update.effective_user.id
-    dbbot.get_user(user_id)
+    user = dbbot.get_user(user_id)
+    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "internet"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -239,8 +241,8 @@ async def ai_internet_command(
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     # LOGGING ====================
-    log_text = "Пользователь выбрал /ai_internet (internet)"
-    dbbot.log_action(user_id, log_text, 0)
+    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
+    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🌐 Режим поиска в интернете активирован. "
         "Задавайте вопросы с поиском!"
@@ -250,14 +252,15 @@ async def ai_internet_command(
 async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима генерации изображений"""
     user_id = update.effective_user.id
-    dbbot.get_user(user_id)
+    user = dbbot.get_user(user_id)
+    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "image"
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     # LOGGING ====================
-    log_text = "Пользователь выбрал /ai_image (image)"
-    dbbot.log_action(user_id, log_text, 0)
+    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
+    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🎨 Режим генерации изображений активирован. "
         "Опишите, что вы хотите увидеть!"
@@ -267,7 +270,8 @@ async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима редактирования изображений с использованием Gemini"""
     user_id = update.effective_user.id
-    dbbot.get_user(user_id)
+    user = dbbot.get_user(user_id)
+    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "edit"
     # Инициализируем данные для редактирования
     user_edit_data[user_id] = {
@@ -292,8 +296,8 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         конвертировано в PNG для лучшего качества.
     """
     # LOGGING ====================
-    log_text = "Пользователь выбрал /ai_edit (edit)"
-    dbbot.log_action(user_id, log_text, 0)
+    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
+    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(help_text)
 
 
@@ -462,20 +466,20 @@ async def handle_message_or_voice(
         return
 
     # Считаем общее количество монет
-    total_coins = user_data["coins"] + user_data["giftcoins"]
+    balance = user_data["coins"] + user_data["giftcoins"]
     # Проверяем, хватает ли монет
-    if total_coins < cost:
+    if balance < cost:
         # LOGGING ====================
         log_text = f""" У пользователя недостаточно средств
             Режим: {current_mode}
             Стоимость: {cost}
-            Баланс: {total_coins}
+            Баланс: {balance}
             """
-        dbbot.log_action(user_id, log_text, 0)
+        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
         await update.message.reply_text(
             f"⚠️ У вас недостаточно монет. "
             f"Стоимость запроса: {cost} монет.\n"
-            f"Ваш баланс: {total_coins} монет.\n"
+            f"Ваш баланс: {balance} монет.\n"
             f"Пополните счёт в /billing"
         )
         return  # ❌ Прерываем выполнение, если монет не хватает
@@ -501,8 +505,8 @@ async def handle_message_or_voice(
             os.remove(file_path)
         except Exception as e:
             # LOGGING ====================
-            log_text = ("Не удалось распознать голосовое сообщение.")
-            dbbot.log_action(user_id, log_text, 0)
+            log_text = "Не удалось распознать голосовое сообщение."
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
             print("Ошибка транскрибации:", e)
             await update.message.reply_text(
                 "⚠️ Не удалось распознать голосовое сообщение."
@@ -635,11 +639,12 @@ async def handle_message_or_voice(
                 -remaining_cost
                 )
         # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
+
         # LOGGING ====================
         log_text = f""" Запрос: {user_message}
             Ответ: {reply}
             """
-        dbbot.log_action(user_id, log_text, cost)
+        dbbot.log_action(user_id, current_mode, log_text, cost, )
     except Exception as e:
         print("Ошибка:", e)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
