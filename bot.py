@@ -658,7 +658,7 @@ async def handle_message_or_voice(
         # Списываем монеты и записываем лог
         spend_coins(user_id, cost, balance,
                     current_mode, user_message, reply
-                   )
+                    )
     except Exception as e:
         print("Ошибка:", e)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
@@ -780,7 +780,6 @@ async def successful_payment_callback(
     """Handle successful payments with Telegram Stars."""
     # Get the message with the successful payment
     successful_payment = update.message.successful_payment
-
     # Map invoice payloads to coin amounts
     product_map = {
         "coins50stars": {"coins": 50, "stars": 50},
@@ -789,7 +788,9 @@ async def successful_payment_callback(
     }
     # Get user ID from the payment
     user_id = update.effective_user.id
-
+    user_data = dbbot.get_user(user_id)
+    balance = user_data["coins"] + user_data["giftcoins"]
+    current_mode = "billing"
     # Check if the invoice payload is valid
     if successful_payment.invoice_payload in product_map:
         product_info = product_map[successful_payment.invoice_payload]
@@ -798,32 +799,45 @@ async def successful_payment_callback(
 
         # Add coins to user's account
         success = dbbot.change_all_coins(user_id, coins_to_add, 0)
-        # LOGGING ====================
-        log_text = f""" Попытка приобретения монет {coins_to_add}
-            за звезды {stars_amount}"""
-        dbbot.log_action(user_id, log_text, coins_to_add)
         if success:
             # Get updated user info
-            user_info = dbbot.get_user(user_id)
-            total_coins = user_info["coins"] + user_info["giftcoins"]
+            balance = user_data["coins"] + user_data["giftcoins"]
             # LOGGING ====================
             log_text = f""" Успешно приобретены монеты {coins_to_add}
                 за звезды {stars_amount}
-                Баланс монет: {total_coins}
+                Баланс монет: {balance}
                 """
-            dbbot.log_action(user_id, log_text, coins_to_add)
+            dbbot.log_action(user_id, current_mode,
+                             log_text, coins_to_add, balance
+                             )
             # Send success message
             await update.message.reply_text(
                 f"🎉 Вы приобрели {coins_to_add} монет за {stars_amount} ⭐️ "
                 "Telegram Stars!\n"
-                f"Ваш новый баланс: {total_coins} монет."
+                f"Ваш новый баланс: {balance} монет."
             )
         else:
+            # LOGGING ====================
+            log_text = f""" Ошибка при пополнении баланса
+                {coins_to_add} монет за звезды {stars_amount}
+                Баланс монет: {balance}
+                """
+            dbbot.log_action(user_id, current_mode,
+                             log_text, coins_to_add, balance
+                             )
             await update.message.reply_text(
                 "❌ Произошла ошибка при пополнении баланса. "
                 "Пожалуйста, свяжитесь с поддержкой."
             )
     else:
+        # LOGGING ====================
+        log_text = f""" Неизвестный продукт (при покупке монет за звезды)
+            {coins_to_add} монет за звезды {stars_amount}
+            Баланс монет: {balance}
+            """
+        dbbot.log_action(user_id, current_mode,
+                         log_text, coins_to_add, balance
+                         )
         await update.message.reply_text(
             "❌ Неизвестный продукт. "
             "Пожалуйста, используйте кнопки в меню /billing."
