@@ -442,6 +442,32 @@ async def transcribe_voice(file_path: str) -> str:
     return transcription.text
 
 
+def spend_coins(user_id: int, cost: int, balance: int,
+                current_mode, user_message, reply
+                ):
+    """ --- ✅ Списываем монеты и записываем лог ---
+        Если основных монет не хватило — списываем из подарочных
+    """
+    remaining_cost = cost
+    if balance >= remaining_cost:
+        dbbot.change_all_coins(user_id, -cost, 0)
+    else:
+        # Сначала списываем с основных
+        remaining_cost -= balance
+        dbbot.change_all_coins(
+            user_id,
+            -balance,
+            -remaining_cost
+            )
+    # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
+
+    # LOGGING ====================
+    log_text = f""" Запрос: {user_message}
+        Ответ: {reply}
+        """
+    dbbot.log_action(user_id, current_mode, log_text, cost, )
+
+
 async def handle_message_or_voice(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
@@ -455,7 +481,7 @@ async def handle_message_or_voice(
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
     # Определяем стоимость в зависимости от режима
     cost = COST_PER_MESSAGE.get(current_mode)
-    print(cost)
+    print(current_mode, " - ", cost)
 
     # Получаем данные пользователя
     user_data = dbbot.get_user(user_id)
@@ -485,7 +511,7 @@ async def handle_message_or_voice(
         return  # ❌ Прерываем выполнение, если монет не хватает
     # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
 
-        # Обработка режима редактирования изображений
+    # Обработка режима редактирования изображений
     if current_mode == "edit":
         await handle_edit_mode(update, context, user_id)
         return
@@ -527,6 +553,10 @@ async def handle_message_or_voice(
             await update.message.reply_photo(
                 image_url, caption=f"Сгенерировано по запросу: {user_message}"
             )
+            # Списываем монеты и записываем лог
+            spend_coins(user_id, cost, balance,
+                        current_mode, user_message, ""
+                        )
         except Exception as e:
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
@@ -625,26 +655,10 @@ async def handle_message_or_voice(
         # Отправляем ответ
         await update.message.reply_text(reply, parse_mode="Markdown")
 
-        # --- ✅ СПИСЫВАЕМ МОНЕТЫ ПОСЛЕ УСПЕШНОГО ОТВЕТА ---
-        # Если основных монет не хватило — списываем из подарочных
-        remaining_cost = cost
-        if user_data["coins"] >= remaining_cost:
-            dbbot.change_all_coins(user_id, -cost, 0)
-        else:
-            # Сначала списываем с основных
-            remaining_cost -= user_data["coins"]
-            dbbot.change_all_coins(
-                user_id,
-                -user_data["coins"],
-                -remaining_cost
-                )
-        # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
-
-        # LOGGING ====================
-        log_text = f""" Запрос: {user_message}
-            Ответ: {reply}
-            """
-        dbbot.log_action(user_id, current_mode, log_text, cost, )
+        # Списываем монеты и записываем лог
+        spend_coins(user_id, cost, balance,
+                    current_mode, user_message, reply
+                   )
     except Exception as e:
         print("Ошибка:", e)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
