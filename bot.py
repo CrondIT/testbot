@@ -191,8 +191,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима обычного чата"""
     user_id = update.effective_user.id
-    user = dbbot.get_user(user_id)
-    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "chat"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -209,9 +207,6 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
-    # LOGGING ====================
-    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
-    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
     )
@@ -222,8 +217,6 @@ async def ai_internet_command(
 ):
     """Активация режима поиска в интернете"""
     user_id = update.effective_user.id
-    user = dbbot.get_user(user_id)
-    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "internet"
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
@@ -240,9 +233,6 @@ async def ai_internet_command(
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
-    # LOGGING ====================
-    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
-    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🌐 Режим поиска в интернете активирован. "
         "Задавайте вопросы с поиском!"
@@ -252,15 +242,10 @@ async def ai_internet_command(
 async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима генерации изображений"""
     user_id = update.effective_user.id
-    user = dbbot.get_user(user_id)
-    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "image"
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
-    # LOGGING ====================
-    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
-    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(
         "🎨 Режим генерации изображений активирован. "
         "Опишите, что вы хотите увидеть!"
@@ -270,8 +255,6 @@ async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима редактирования изображений с использованием Gemini"""
     user_id = update.effective_user.id
-    user = dbbot.get_user(user_id)
-    balance = user["coins"] + user["giftcoins"]
     user_modes[user_id] = "edit"
     # Инициализируем данные для редактирования
     user_edit_data[user_id] = {
@@ -295,9 +278,6 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         📝 Изображение будет автоматически
         конвертировано в PNG для лучшего качества.
     """
-    # LOGGING ====================
-    log_text = f"Пользователь выбрал режим {user_modes[user_id]}"
-    dbbot.log_action(user_id, user_modes[user_id], log_text, 0, balance)
     await update.message.reply_text(help_text)
 
 
@@ -460,12 +440,12 @@ def spend_coins(user_id: int, cost: int, balance: int,
             -remaining_cost
             )
     # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
-
+    balance = balance - cost
     # LOGGING ====================
     log_text = f""" Запрос: {user_message}
         Ответ: {reply}
         """
-    dbbot.log_action(user_id, current_mode, log_text, cost, )
+    dbbot.log_action(user_id, current_mode, log_text, -cost, balance)
 
 
 async def handle_message_or_voice(
@@ -481,8 +461,6 @@ async def handle_message_or_voice(
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
     # Определяем стоимость в зависимости от режима
     cost = COST_PER_MESSAGE.get(current_mode)
-    print(current_mode, " - ", cost)
-
     # Получаем данные пользователя
     user_data = dbbot.get_user(user_id)
     if not user_data:
@@ -558,6 +536,9 @@ async def handle_message_or_voice(
                         current_mode, user_message, ""
                         )
         except Exception as e:
+            # LOGGING ====================
+            log_text = f"⚠️ {str(e)}"
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
 
@@ -591,6 +572,10 @@ async def handle_message_or_voice(
             results = DDGS().text(user_message, max_results=4)
 
             if not results:
+                # LOGGING ====================
+                log_text = f""" Не удалось найти результаты по запросу:
+                    {user_message}"""
+                dbbot.log_action(user_id, current_mode, log_text, 0, balance)
                 await update.message.reply_text(
                     "❌ Не удалось найти результаты по запросу."
                 )
@@ -615,7 +600,9 @@ async def handle_message_or_voice(
             ]
 
         except Exception as e:
-            print("Ошибка поиска DuckDuckGo:", e)
+            # LOGGING ====================
+            log_text = f"Ошибка поиска DuckDuckGo: {e}"
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
             await update.message.reply_text(
                 "⚠️ Не удалось выполнить поиск в интернете."
             )
@@ -660,7 +647,9 @@ async def handle_message_or_voice(
                     current_mode, user_message, reply
                     )
     except Exception as e:
-        print("Ошибка:", e)
+        # LOGGING ====================
+        log_text = f"Ошибка при обращении к ChatGP: {e}"
+        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
 
 
@@ -823,7 +812,7 @@ async def successful_payment_callback(
                 Баланс монет: {balance}
                 """
             dbbot.log_action(user_id, current_mode,
-                             log_text, coins_to_add, balance
+                             log_text, 0, balance
                              )
             await update.message.reply_text(
                 "❌ Произошла ошибка при пополнении баланса. "
@@ -836,7 +825,7 @@ async def successful_payment_callback(
             Баланс монет: {balance}
             """
         dbbot.log_action(user_id, current_mode,
-                         log_text, coins_to_add, balance
+                         log_text, 0, balance
                          )
         await update.message.reply_text(
             "❌ Неизвестный продукт. "

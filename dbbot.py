@@ -256,12 +256,13 @@ def log_action(userid, mode, text, cost, balance):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO logs (userid, mode, text, cost, balancee)
+                    INSERT INTO logs (userid, mode, text, cost, balance)
                     VALUES (%s, %s, %s, %s, %s)
                     """,
                     (userid, mode, text, cost, balance)
                 )
                 conn.commit()
-                print(f"Лог записан для userid={userid}: {text}")
+                print(f"""Лог записан для userid={userid}, режим {mode},
+                      движение {cost}, баланс {balance}""")
     except psycopg2.Error as e:
         print(f"Ошибка при записи в лог: {e}")
