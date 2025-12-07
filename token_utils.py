@@ -14,7 +14,9 @@ class TokenCounter:
         self.openai_encoders = {}
 
     def count_openai_tokens(
-        self, text: str, model: str = "gpt-4o-mini"
+        self,
+        text: str,
+        model: str
     ) -> int:
         """
         Count tokens for OpenAI models using tiktoken
@@ -31,7 +33,9 @@ class TokenCounter:
             return len(text) // 4
 
     def count_openai_messages_tokens(
-        self, messages: List[Dict[str, str]], model: str = "gpt-4o-mini"
+        self,
+        messages: List[Dict[str, str]],
+        model: str
     ) -> int:
         """
         Count tokens for a list of messages (with roles) for OpenAI models
@@ -70,12 +74,14 @@ def get_token_limit(model_name: str) -> int:
     """
     limits = {
         # OpenAI models
+        "gpt-5.1": 128000,
         "gpt-4o-mini": 128000,
         "gpt-4-turbo": 128000,
+        "gpt-4o": 128000,
         "gpt-4": 8192,
         "gpt-3.5-turbo": 16385,
         # DALL-E models
-        "dall-e-3": 1000,  # Prompt length limit
+        "dall-e-3": 4096,  # Prompt length limit
         # Gemini models
         "gemini-2.5-flash": 1048576,
         "gemini-2.5-pro": 2097152,
@@ -88,7 +94,7 @@ def get_token_limit(model_name: str) -> int:
 
 def truncate_messages_for_token_limit(
     messages: List[Dict[str, str]],
-    model: str = "gpt-4o-mini",
+    model: str,
     max_tokens: int = None,
     reserve_tokens: int = 1000,
 ) -> List[Dict[str, str]]:
@@ -162,7 +168,7 @@ def truncate_messages_for_token_limit(
 
 def check_token_usage(
     messages: List[Dict[str, str]],
-    model: str = "gpt-4o-mini",
+    model: str,
     max_tokens: int = None,
     reserve_tokens: int = 1000,
 ) -> Dict[str, Any]:

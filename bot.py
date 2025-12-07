@@ -36,6 +36,14 @@ OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 
+# Модели для разных режимов
+MODELS = {
+    "chat": "gpt-5.1",
+    "internet": "gpt-4o-mini",
+    "image": "dall-e-3",
+    "edit": "gemini-2.5-flash",
+}
+
 # Cost per message
 COST_PER_MESSAGE = {
     "chat": 1,
@@ -55,7 +63,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
-MAX_CONTEXT_MESSAGES = 10
+MAX_CONTEXT_MESSAGES = 8
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -321,11 +329,12 @@ async def download_and_convert_image(
 
 async def generate_image(prompt: str) -> str:
     """Генерирует изображение с помощью DALL-E"""
+    model_name = MODELS["image"]  # Используем константу
     # Проверяем длину промпта на токены (ограничение для DALL-E)
     prompt_tokens = token_utils.token_counter.count_openai_tokens(
-        prompt, "dall-e-3"
+        prompt, model_name
     )
-    max_tokens = token_utils.get_token_limit("dall-e-3")
+    max_tokens = token_utils.get_token_limit(model_name)
 
     if prompt_tokens > max_tokens:
         # Обрезаем промпт до допустимого размера
@@ -335,7 +344,7 @@ async def generate_image(prompt: str) -> str:
 
     try:
         response = client_image.images.generate(
-            model="dall-e-3",
+            model=model_name,  # Используем константу
             prompt=prompt,
             size="1024x1024",
             quality="standard",
@@ -350,12 +359,13 @@ async def edit_image_with_gemini(
     original_image: io.BytesIO, prompt: str
 ) -> str:
     """Редактирует изображение с помощью Gemini 2.5 Flash"""
+    model_name = MODELS["edit"]  # Используем константу
     try:
         # Проверяем длину промпта на токены
-        prompt_tokens = token_utils.token_counter.estimate_gemini_tokens(
-            prompt
+        prompt_tokens = token_utils.token_counter.count_openai_tokens(
+            prompt, model_name
         )
-        max_tokens = token_utils.get_token_limit("gemini-2.5-flash")
+        max_tokens = token_utils.get_token_limit(model_name)
 
         if prompt_tokens > max_tokens:
             # Обрезаем промпт до допустимого размера
@@ -366,7 +376,7 @@ async def edit_image_with_gemini(
         # Подготовка изображения для Gemini
         original_image.seek(0)
         # Создаем модель Gemini
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel(model_name)
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
         Проанализируй это изображение и выполни следующие изменения: {prompt}
@@ -446,6 +456,42 @@ def spend_coins(user_id: int, cost: int, balance: int,
         Ответ: {reply}
         """
     dbbot.log_action(user_id, current_mode, log_text, -cost, balance)
+
+
+def ask_gpt51_with_web_search(query: str) -> str:
+    """
+    Задать вопрос GPT-5.1 с возможностью поиска в интернете (web_search).
+    """
+
+    response = client_chat.responses.create(
+        model="gpt-5.1",  # при желании можно поставить "gpt-5.1-thinking"
+        # Разрешаем модели вызывать инструмент web_search
+        tools=[
+            {
+                "type": "web_search",
+                # можно будет добавлять фильтры, местоположение и т.п.
+            }
+        ],
+        tool_choice="auto",  # модель сама решает, когда использовать поиск
+        # Основной текстовый запрос
+        input=query,
+        # Немного «характера» модели
+        instructions=(
+            "You are a helpful assistant. "
+            "Use web search only when your knowledge may be outdated "
+            "or when the user explicitly asks for fresh data."
+        ),
+        # Ограничения генерации
+        max_output_tokens=1500,
+        temperature=0.4,
+        # Если нужны ссылки-источники по web_search:
+        include=["web_search_call.action.sources"],
+    )
+
+    # В Python SDK есть удобное поле output_text – агрегированный текст ответа.
+    # [oai_citation:1‡platform.openai.com]
+    # (https://platform.openai.com/docs/api-reference/responses?utm_source=chatgpt.com)
+    return response.output_text
 
 
 async def handle_message_or_voice(
@@ -614,8 +660,9 @@ async def handle_message_or_voice(
         ]
 
     # Проверяем и ограничиваем количество токенов
+    model_name = MODELS.get(current_mode)
     messages = token_utils.truncate_messages_for_token_limit(
-        messages, model="gpt-4o-mini", reserve_tokens=1000
+        messages, model=model_name, reserve_tokens=1000
     )
 
     # Дополнительно ограничиваем длину истории
@@ -624,11 +671,14 @@ async def handle_message_or_voice(
 
     try:
         # Используем клиент чата для обоих текстовых режимов
+        """
         response = client_chat.chat.completions.create(
-            model="gpt-4o-mini", messages=messages
+            model=model_name,  # Используем модель из константы
+            messages=messages
         )
-
         reply = response.choices[0].message.content
+        """
+        reply = ask_gpt51_with_web_search(messages)
 
         # Обновляем контекст: добавляем и запрос, и ответ
         if current_mode == "internet":
