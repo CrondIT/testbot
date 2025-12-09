@@ -63,7 +63,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
-MAX_CONTEXT_MESSAGES = 8
+MAX_CONTEXT_MESSAGES = 4
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -482,7 +482,7 @@ def ask_gpt51_with_web_search(query: str) -> str:
             "or when the user explicitly asks for fresh data."
         ),
         # Ограничения генерации
-        max_output_tokens=1500,
+        # max_output_tokens=1500,
         temperature=0.4,
         # Если нужны ссылки-источники по web_search:
         include=["web_search_call.action.sources"],
