@@ -41,7 +41,7 @@ MODELS = {
     "chat": "gpt-5.1",
     "internet": "gpt-4o-mini",
     "image": "dall-e-3",
-    "edit": "gemini-2.5-flash-exp",
+    "edit": "gemini-2.5-flash-preview-image",
 }
 
 # Cost per message
