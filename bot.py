@@ -465,7 +465,7 @@ def ask_gpt51_with_web_search(query: str,
     Задать вопрос GPT-5.1 с опциональным поиском в интернете.
 
     :param query: Текст вопроса.
-    :param enable_web_search: 
+    :param enable_web_search:
         Если True — модель может использовать интернет-поиск.
         Если False — только внутренние знания, без поиска.
     :return: Текст ответа от модели.
