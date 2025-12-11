@@ -458,39 +458,45 @@ def spend_coins(user_id: int, cost: int, balance: int,
     dbbot.log_action(user_id, current_mode, log_text, -cost, balance)
 
 
-def ask_gpt51_with_web_search(query: str) -> str:
+def ask_gpt51_with_web_search(query: str,
+                              enable_web_search: bool = True
+                              ) -> str:
     """
-    Задать вопрос GPT-5.1 с возможностью поиска в интернете (web_search).
+    Задать вопрос GPT-5.1 с опциональным поиском в интернете.
+
+    :param query: Текст вопроса.
+    :param enable_web_search: 
+        Если True — модель может использовать интернет-поиск.
+        Если False — только внутренние знания, без поиска.
+    :return: Текст ответа от модели.
     """
+    # Подготовка инструментов: только если разрешён поиск
+    tools = [
+        {
+            "type": "web_search",
+            # Можно расширить: фильтры, язык, регион и т.п.
+        }
+    ] if enable_web_search else []
+
+    # Выбор поведения: использовать ли инструменты
+    tool_choice = "auto" if enable_web_search else "none"
 
     response = client_chat.responses.create(
-        model="gpt-5.1",  # при желании можно поставить "gpt-5.1-thinking"
-        # Разрешаем модели вызывать инструмент web_search
-        tools=[
-            {
-                "type": "web_search",
-                # можно будет добавлять фильтры, местоположение и т.п.
-            }
-        ],
-        tool_choice="auto",  # модель сама решает, когда использовать поиск
-        # Основной текстовый запрос
+        model="gpt-5.1",  # или "gpt-5.1-thinking"
+        tools=tools,
+        tool_choice=tool_choice,
         input=query,
-        # Немного «характера» модели
         instructions=(
             "You are a helpful assistant. "
             "Use web search only when your knowledge may be outdated "
             "or when the user explicitly asks for fresh data."
         ),
-        # Ограничения генерации
-        # max_output_tokens=1500,
         temperature=0.4,
-        # Если нужны ссылки-источники по web_search:
-        include=["web_search_call.action.sources"],
+        # include sources only if web search is enabled
+        include=["web_search_call.action.sources"]
+        if enable_web_search else [],
     )
 
-    # В Python SDK есть удобное поле output_text – агрегированный текст ответа.
-    # [oai_citation:1‡platform.openai.com]
-    # (https://platform.openai.com/docs/api-reference/responses?utm_source=chatgpt.com)
     return response.output_text
 
 
