@@ -41,7 +41,7 @@ MODELS = {
     "chat": "gpt-5.1",
     "internet": "gpt-4o-mini",
     "image": "dall-e-3",
-    "edit": "gemini-2.5-flash",
+    "edit": "gemini-2.5-flash-exp",
 }
 
 # Cost per message
@@ -64,6 +64,63 @@ user_contexts = {}  # Хранилище контекста для каждог�
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
 MAX_CONTEXT_MESSAGES = 4
+
+
+async def get_gemini_models_info() -> str:
+    """
+    Возвращает информацию о доступных моделях Gemini в виде строки.
+    """
+    try:
+        models = genai.list_models()
+        lines = ["🤖 Доступные модели Gemini:\n"]
+        for model in models:
+            model_id = model.name.split("/")[-1]
+            input_tokens = model.input_token_limit
+            output_tokens = model.output_token_limit
+            methods = ", ".join(model.supported_generation_methods)
+            temp = f"{model.temperature:.1f}" if model.temperature else "не задана"
+
+            lines.append(
+                f"🔹 *{model_id}*"
+                f"\n   Вход: `{input_tokens}` токенов"
+                f"\n   Выход: `{output_tokens}` токенов"
+                f"\n   Режимы: `{methods}`"
+                f"\n   Температура: `{temp}`"
+                f"\n"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Ошибка при получении моделей Gemini: `{str(e)}`"
+
+
+async def models_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Обработчик команды /models_gemini — показывает доступные модели Gemini.
+    """
+    await update.message.reply_text(
+        "🔄 Запрашиваю список моделей у Gemini...",
+        parse_mode="Markdown"
+    )
+    info = await get_gemini_models_info()
+    await update.message.reply_text(info, parse_mode="Markdown")
+
+
+async def get_openai_models_info() -> str:
+    try:
+        # УБИРАЕМ await — вызов синхронный!
+        models = client_image.models.list()
+        lines = ["🤖 Доступные модели OpenAI:\n"]
+        for model in models:
+            lines.append(f"🔹 `{model.id}`")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"❌ Ошибка: `{e}`"
+
+
+async def models_openai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Запрашиваю список моделей у OpenAI...")
+    info = await get_openai_models_info()
+    await update.message.reply_text(info, parse_mode="Markdown")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -900,6 +957,9 @@ def main():
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
     app.add_handler(CommandHandler("billing", billing))
     app.add_handler(CommandHandler("clear", clear_context))
+
+    app.add_handler(CommandHandler("models_gemini", models_gemini))
+    app.add_handler(CommandHandler("models_openai", models_openai))
 
     # Обрабатываем и текст, и голосовые сообщения
     app.add_handler(
