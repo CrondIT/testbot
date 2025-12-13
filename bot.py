@@ -16,8 +16,6 @@ from telegram.ext import (
     MessageHandler as TelegramMessageHandler,
 )
 
-from ddgs import DDGS
-
 from PIL import Image
 
 import io
@@ -39,15 +37,13 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.1",
-    "internet": "gpt-4o-mini",
     "image": "dall-e-3",
     "edit": "gemini-2.5-flash-preview-image",
 }
 
 # Cost per message
 COST_PER_MESSAGE = {
-    "chat": 1,
-    "internet": 2,
+    "chat": 2,
     "image": 5,
     "edit": 6,
 }
@@ -78,7 +74,9 @@ async def get_gemini_models_info() -> str:
             input_tokens = model.input_token_limit
             output_tokens = model.output_token_limit
             methods = ", ".join(model.supported_generation_methods)
-            temp = f"{model.temperature:.1f}" if model.temperature else "не задана"
+            temp = (f"{model.temperature:.1f}"
+                    if model.temperature else "не задана"
+                    )
 
             lines.append(
                 f"🔹 *{model_id}*"
@@ -136,7 +134,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         Доступные команды:
         /ai - Чат с ИИ
-        /ai_internet - ИИ с поиском в интернете
         /ai_image - Генерация изображений
         /ai_edit - Редактирование изображений
         /billing - Управление счетом
@@ -257,50 +254,11 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Активация режима обычного чата"""
     user_id = update.effective_user.id
     user_modes[user_id] = "chat"
-    if user_id not in user_contexts:
-        user_contexts[user_id] = {}
-    if "chat" not in user_contexts[user_id]:
-        user_contexts[user_id]["chat"] = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты дружелюбный Telegram-бот, "
-                    "отвечай понятно и по существу."
-                ),
-            }
-        ]
     # Очищаем данные редактирования при смене режима
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     await update.message.reply_text(
         "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
-    )
-
-
-async def ai_internet_command(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-    """Активация режима поиска в интернете"""
-    user_id = update.effective_user.id
-    user_modes[user_id] = "internet"
-    if user_id not in user_contexts:
-        user_contexts[user_id] = {}
-    if "internet" not in user_contexts[user_id]:
-        user_contexts[user_id]["internet"] = [
-            {
-                "role": "system",
-                "content": (
-                    "Ты помощник, который ищет информацию в интернете "
-                    "и предоставляет актуальные данные."
-                ),
-            }
-        ]
-    # Очищаем данные редактирования при смене режима
-    if user_id in user_edit_data:
-        del user_edit_data[user_id]
-    await update.message.reply_text(
-        "🌐 Режим поиска в интернете активирован. "
-        "Задавайте вопросы с поиском!"
     )
 
 
@@ -652,74 +610,23 @@ async def handle_message_or_voice(
         return
 
     # Инициализация контекста для текущего режима
+    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
     if user_id not in user_contexts:
         user_contexts[user_id] = {}
 
     if current_mode not in user_contexts[user_id]:
-        if current_mode == "chat":
-            user_contexts[user_id][current_mode] = [
-                {
-                    "role": "system",
-                    "content": "Ты дружелюбный Telegram-бот, "
-                    "отвечай понятно и по существу.",
-                }
-            ]
-        else:  # internet mode
-            user_contexts[user_id][current_mode] = [
-                {
-                    "role": "system",
-                    "content": "Ты помощник, который ищет информацию "
-                    "в интернете и предоставляет актуальные данные.",
-                }
-            ]
-
-    # Для режима internet проверяем необходимость поиска
-    if current_mode == "internet":
-        try:
-            await update.message.reply_text("🔍 Ищу информацию в интернете...")
-            # Выполняем поиск через DuckDuckGo
-            results = DDGS().text(user_message, max_results=4)
-
-            if not results:
-                # LOGGING ====================
-                log_text = f""" Не удалось найти результаты по запросу:
-                    {user_message}"""
-                dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-                await update.message.reply_text(
-                    "❌ Не удалось найти результаты по запросу."
-                )
-                return
-
-            # Формируем текст из результатов
-            search_content = "\n".join(
-                [
-                    f"{i+1}. [{r['title']}]({r['href']}): {r['body']}"
-                    for i, r in enumerate(results)
-                ]
-            )
-
-            # Подготовим сообщение с результатами для GPT
-            search_prompt = f"""Вот результаты поиска в интернете:
-                \n\n{search_content}\n\nОтветь на запрос пользователя,
-                используя эту информацию: {user_message}"""
-
-            # Формируем сообщения для GPT
-            messages = user_contexts[user_id][current_mode] + [
-                {"role": "user", "content": search_prompt}
-            ]
-
-        except Exception as e:
-            # LOGGING ====================
-            log_text = f"Ошибка поиска DuckDuckGo: {e}"
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-            await update.message.reply_text(
-                "⚠️ Не удалось выполнить поиск в интернете."
-            )
-            return
-    else:
-        # Обычный режим — добавляем сообщение пользователя
-        messages = user_contexts[user_id][current_mode] + [
-            {"role": "user", "content": user_message}
+        system_messages = {
+        "chat": "Ты дружелюбный Telegram-бот, отвечай понятно и по существу.",
+        "image": "Ты помогаешь генерировать изображения.",
+        "edit": "Ты помогаешь редактировать изображения с помощью Gemini."
+        }
+    system_content = system_messages.get(current_mode, "Ты помощник.")
+    user_contexts[user_id][current_mode] = [
+        {"role": "system", "content": system_content}
+    ]
+    # Обычный режим — добавляем сообщение пользователя
+    messages = user_contexts[user_id][current_mode] + [
+        {"role": "user", "content": user_message}
         ]
 
     # Проверяем и ограничиваем количество токенов
@@ -733,7 +640,7 @@ async def handle_message_or_voice(
         messages = messages[-MAX_CONTEXT_MESSAGES:]
 
     try:
-        # Используем клиент чата для обоих текстовых режимов
+        # Используем клиент чата
         """
         response = client_chat.chat.completions.create(
             model=model_name,  # Используем модель из константы
@@ -744,10 +651,6 @@ async def handle_message_or_voice(
         reply = ask_gpt51_with_web_search(messages)
 
         # Обновляем контекст: добавляем и запрос, и ответ
-        if current_mode == "internet":
-            user_contexts[user_id][current_mode].append(
-                {"role": "user", "content": user_message}
-            )
         user_contexts[user_id][current_mode].append(
             {"role": "assistant", "content": reply}
         )
@@ -952,7 +855,6 @@ def main():
     # Обработчики команд
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ai", ai_command))
-    app.add_handler(CommandHandler("ai_internet", ai_internet_command))
     app.add_handler(CommandHandler("ai_image", ai_image_command))
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
     app.add_handler(CommandHandler("billing", billing))
@@ -983,8 +885,7 @@ def main():
 
     print("✅ Мульти-режимный бот запущен!")
     print(
-        "Режимы: /ai (OpenAI), /ai_internet, "
-        "/ai_image (DALL-E), /ai_edit (Gemini)"
+        "Режимы: /ai (OpenAI), /ai_image (DALL-E), /ai_edit (Gemini)"
     )
     app.run_polling()
 
