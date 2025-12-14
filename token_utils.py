@@ -28,24 +28,47 @@ class TokenCounter:
                 )
             encoder = self.openai_encoders[model]
             return len(encoder.encode(text))
-        except Exception:
+        except Exception as e:
             # Fallback: rough estimation (1 token ~ 4 characters)
+            print(f"Ошибка count_openai_tokens: {e}")
             return len(text) // 4
 
     def count_openai_messages_tokens(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict],
         model: str
     ) -> int:
-        """
-        Count tokens for a list of messages (with roles) for OpenAI models
-        """
+        try:
+            # Для новых моделей использовать "cl100k_base"
+            if "gpt-4" in model or "gpt-3.5" in model or "gpt-5" in model:
+                encoding = tiktoken.get_encoding("cl100k_base")
+            else:
+                encoding = tiktoken.encoding_for_model(model)
+        except Exception as e:
+            print(f"Ошибка count_openai_messages_tokens: {e}")
+            encoding = tiktoken.get_encoding("cl100k_base")
+
+        tokens_per_message = 3  # <|start|>{role}|<|message|>{content}|<|end|>
+        tokens_per_name = 1
+
         total_tokens = 0
         for message in messages:
+            total_tokens += tokens_per_message
             for key, value in message.items():
-                total_tokens += self.count_openai_tokens(str(value), model)
-        # Add some overhead for role formatting
-        total_tokens += len(messages) * 3
+                if isinstance(value, str):
+                    total_tokens += len(encoding.encode(value))
+                elif isinstance(value, list):
+                    # Если content — список (например, текст + изображение)
+                    for item in value:
+                        if isinstance(item, dict):
+                            if "text" in item:
+                                total_tokens += len(
+                                    encoding.encode(item["text"])
+                                    )
+                            # изображения: не кодируются напрямую
+                if key == "name":
+                    total_tokens += tokens_per_name
+        total_tokens += 3  # <|end|> в конце
         return total_tokens
 
     def estimate_gemini_tokens(self, text: str) -> int:

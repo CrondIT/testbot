@@ -474,21 +474,25 @@ async def transcribe_voice(file_path: str) -> str:
     return transcription.text
 
 
-def spend_coins(user_id: int, cost: int, balance: int,
-                current_mode, user_message, reply
+def spend_coins(user_id: int,
+                cost: int,
+                coins: int,
+                giftcoins: int,
+                current_mode, user_message, reply,
                 ):
     """ --- ✅ Списываем монеты и записываем лог ---
         Если основных монет не хватило — списываем из подарочных
     """
+    balance = coins + giftcoins
     remaining_cost = cost
-    if balance >= remaining_cost:
-        dbbot.change_all_coins(user_id, -cost, 0)
+    if coins >= remaining_cost:
+        dbbot.change_all_coins(user_id, -remaining_cost, 0)
     else:
         # Сначала списываем с основных
-        remaining_cost -= balance
+        remaining_cost -= coins
         dbbot.change_all_coins(
             user_id,
-            -balance,
+            -coins,
             -remaining_cost
             )
     # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
@@ -564,7 +568,9 @@ async def handle_message_or_voice(
         return
 
     # Считаем общее количество монет
-    balance = user_data["coins"] + user_data["giftcoins"]
+    coins = user_data["coins"]
+    giftcoins = user_data["giftcoins"]
+    balance = coins + giftcoins
     # Проверяем, хватает ли монет
     if balance < cost:
         # LOGGING ====================
@@ -626,7 +632,7 @@ async def handle_message_or_voice(
                 image_url, caption=f"Сгенерировано по запросу: {user_message}"
             )
             # Списываем монеты и записываем лог
-            spend_coins(user_id, cost, balance,
+            spend_coins(user_id, cost, coins, giftcoins,
                         current_mode, user_message, ""
                         )
         except Exception as e:
@@ -657,15 +663,20 @@ async def handle_message_or_voice(
             {"role": "system", "content": system_content}
             ]
     # Обычный режим — добавляем сообщение пользователя
+    """
     messages = user_contexts[user_id][current_mode] + [
         {"role": "user", "content": user_message}
         ]
+    """
 
     # Проверяем и ограничиваем количество токенов
     model_name = MODELS.get(current_mode)
-    messages = token_utils.truncate_messages_for_token_limit(
-        messages, model=model_name, reserve_tokens=1000
-    )
+    truncated_history = token_utils.truncate_messages_for_token_limit(
+        user_contexts[user_id][current_mode],
+        model=model_name,
+        reserve_tokens=1500,
+        )
+    messages = truncated_history + [{"role": "user", "content": user_message}]
 
     # Дополнительно ограничиваем длину истории
     if len(messages) > MAX_CONTEXT_MESSAGES:
@@ -691,7 +702,7 @@ async def handle_message_or_voice(
         await update.message.reply_text(reply, parse_mode="Markdown")
 
         # Списываем монеты и записываем лог
-        spend_coins(user_id, cost, balance,
+        spend_coins(user_id, cost,  coins, giftcoins,
                     current_mode, user_message, reply
                     )
     except Exception as e:
