@@ -1,3 +1,5 @@
+import atexit
+
 import os
 
 from dotenv import load_dotenv
@@ -60,6 +62,31 @@ user_contexts = {}  # Хранилище контекста для каждог�
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
 MAX_CONTEXT_MESSAGES = 4
+
+
+# --- Файл для хранения PID для котроля что процесс уже запущен- ---
+PID_FILE = "bot.pid"
+
+
+def check_pid():
+    if os.path.exists(PID_FILE):
+        with open(PID_FILE, 'r') as f:
+            try:
+                pid = int(f.read().strip())
+                # Проверяем, жив ли процесс
+                os.kill(pid, 0)
+                print(f"❌ Бот уже запущен (PID: {pid}). Завершаем.")
+                exit(1)
+            except (OSError, ValueError):
+                # Процесс не существует — можно запускаться
+                pass
+    # Записываем текущий PID
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+
+    # Удаляем файл при выходе
+    atexit.register(lambda: os.path.exists(PID_FILE) and os.remove(PID_FILE))
+# --- окончание проверки PID  для котроля что процесс уже запущен---
 
 
 async def get_gemini_models_info() -> str:
@@ -616,14 +643,19 @@ async def handle_message_or_voice(
 
     if current_mode not in user_contexts[user_id]:
         system_messages = {
-        "chat": "Ты дружелюбный Telegram-бот, отвечай понятно и по существу.",
-        "image": "Ты помогаешь генерировать изображения.",
-        "edit": "Ты помогаешь редактировать изображения с помощью Gemini."
-        }
-    system_content = system_messages.get(current_mode, "Ты помощник.")
-    user_contexts[user_id][current_mode] = [
-        {"role": "system", "content": system_content}
-    ]
+            "chat": (
+                    "Ты дружелюбный Telegram-бот, "
+                    " отвечай понятно и по существу."
+                    ),
+            "image": "Ты помогаешь генерировать изображения.",
+            "edit": "Ты помогаешь редактировать изображения с помощью Gemini.",
+            }
+        # Получаем системное сообщение для текущего режима
+        system_content = system_messages.get(current_mode, "Ты помощник.")
+        # Инициализируем контекст
+        user_contexts[user_id][current_mode] = [
+            {"role": "system", "content": system_content}
+            ]
     # Обычный режим — добавляем сообщение пользователя
     messages = user_contexts[user_id][current_mode] + [
         {"role": "user", "content": user_message}
@@ -850,6 +882,7 @@ async def successful_payment_callback(
 
 
 def main():
+    check_pid()  # Проверка на дубль
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     # Обработчики команд
@@ -887,7 +920,7 @@ def main():
     print(
         "Режимы: /ai (OpenAI), /ai_image (DALL-E), /ai_edit (Gemini)"
     )
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
