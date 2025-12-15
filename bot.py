@@ -17,6 +17,7 @@ from telegram.ext import (
     PreCheckoutQueryHandler,
     MessageHandler as TelegramMessageHandler,
 )
+from telegram.helpers import escape_markdown
 
 from PIL import Image
 
@@ -127,7 +128,8 @@ async def models_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     info = await get_gemini_models_info()
-    await update.message.reply_text(info, parse_mode="Markdown")
+    safe_info = escape_markdown(info, version=2)
+    await update.message.reply_text(safe_info, parse_mode="MarkdownV2")
 
 
 async def get_openai_models_info() -> str:
@@ -145,7 +147,8 @@ async def get_openai_models_info() -> str:
 async def models_openai(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 Запрашиваю список моделей у OpenAI...")
     info = await get_openai_models_info()
-    await update.message.reply_text(info, parse_mode="Markdown")
+    safe_info = escape_markdown(info, version=2)
+    await update.message.reply_text(safe_info, parse_mode="MarkdownV2")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -516,6 +519,18 @@ def ask_gpt51_with_web_search(query: str,
         Если False — только внутренние знания, без поиска.
     :return: Текст ответа от модели.
     """
+    # Проверяем длину запроса и ограничиваем его при необходимости
+    model_name = "gpt-5.1"
+    max_tokens = token_utils.get_token_limit(model_name)
+    query_tokens = token_utils.token_counter.count_openai_tokens(
+        query, model_name)
+
+    if query_tokens > max_tokens:
+        # Обрезаем запрос до допустимого размера
+        avg_token_size = 4  # средний размер токена в символах
+        max_chars = max_tokens * avg_token_size
+        query = query[:max_chars]
+
     # Подготовка инструментов: только если разрешён поиск
     tools = [
         {
@@ -684,14 +699,27 @@ async def handle_message_or_voice(
 
     try:
         # Используем клиент чата
-        """
+        # Проверяем, что последнее сообщение - это от пользователя
+        if messages and messages[-1]["role"] == "user":
+            # Проверяем токены перед отправкой
+            token_counter = token_utils.token_counter
+            total_tokens = token_counter.count_openai_messages_tokens(
+                messages, model_name)
+            max_tokens = token_utils.get_token_limit(model_name)
+
+            if total_tokens > max_tokens:
+                # Обрезаем сообщения до приемлемого размера
+                messages = token_utils.truncate_messages_for_token_limit(
+                    messages,
+                    model=model_name,
+                    reserve_tokens=1500  # Оставляем место для ответа
+                )
+
         response = client_chat.chat.completions.create(
             model=model_name,  # Используем модель из константы
             messages=messages
         )
         reply = response.choices[0].message.content
-        """
-        reply = ask_gpt51_with_web_search(messages)
 
         # Обновляем контекст: добавляем и запрос, и ответ
         user_contexts[user_id][current_mode].append(
@@ -699,17 +727,30 @@ async def handle_message_or_voice(
         )
 
         # Отправляем ответ
-        await update.message.reply_text(reply, parse_mode="Markdown")
+        # Экранируем специальные символы Markdown, чтобы избежать ошибок
+        safe_reply = escape_markdown(reply, version=2)
+        await update.message.reply_text(safe_reply, parse_mode="MarkdownV2")
 
         # Списываем монеты и записываем лог
         spend_coins(user_id, cost,  coins, giftcoins,
-                    current_mode, user_message, reply
+                    current_mode, user_message, safe_reply
                     )
     except Exception as e:
-        # LOGGING ====================
-        log_text = f"Ошибка при обращении к ChatGP: {e}"
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-        await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
+        # Обработка ошибки "Message is too long" и других
+        error_msg = str(e)
+        if "too long" in error_msg.lower() or "token" in error_msg.lower():
+            # LOGGING ====================
+            log_text = f"Ошибка: Сообщение слишком длинное: {str(e)}"
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+            await update.message.reply_text(
+                "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
+            )
+        else:
+            # LOGGING ====================
+            log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+            await update.message.reply_text(
+                "⚠️ Ошибка при обращении к ChatGPT.")
 
 
 async def handle_edit_mode(
