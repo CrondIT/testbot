@@ -896,8 +896,10 @@ async def handle_message_or_voice(
             model_name = MODELS.get(current_mode)
             max_tokens = token_utils.get_token_limit(model_name)
 
-            # Rough estimation: 1 token ~ 4 characters, reserve tokens for response and context
-            max_chars = min(len(extracted_text), (max_tokens - 1500) * 3)  # 1500 reserved for context
+            # Rough estimation: 1 token ~ 4 characters, 
+            # reserve tokens for response and context
+            # 1500 reserved for context
+            max_chars = min(len(extracted_text), (max_tokens - 1500) * 3)
 
             if len(extracted_text) > max_chars:
                 # Truncate the extracted text and inform the user
@@ -954,9 +956,10 @@ async def handle_message_or_voice(
             if current_mode not in user_contexts[user_id]:
                 system_messages = {
                     "chat": (
-                        "Ты дружелюбный Telegram-бот, "
-                        " отвечай понятно и по существу."
-                    ),
+                        "You are a helpful assistant. "
+                        "Use web search only when your knowledge may be outdated "
+                        "or when the user explicitly asks for fresh data."
+                        ),
                     "image": "Ты помогаешь генерировать изображения.",
                     "edit": (
                         "Ты помогаешь редактировать "
@@ -977,7 +980,7 @@ async def handle_message_or_voice(
                     {"role": "system", "content": system_content}
                 ]
 
-            # Prepare messages with truncated history 
+            # Prepare messages with truncated history
             # using the augmented question
             model_name = MODELS.get(current_mode)
             truncated_history = token_utils.truncate_messages_for_token_limit(
