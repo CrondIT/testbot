@@ -32,8 +32,7 @@ import token_utils
 import PyPDF2
 from docx import Document
 import pandas as pd
-import xlrd  # Required for legacy XLS files
-
+import xlrd  # noqa  # Used indirectly via pandas
 # OCR imports
 import pytesseract
 from PIL import Image as PILImage
@@ -759,6 +758,41 @@ async def process_uploaded_file(file_path: str, file_extension: str) -> str:
         raise Exception(f"Unsupported file format: {file_extension}")
 
 
+def initialize_user_context(user_id: int, current_mode: str):
+    """Инициализирует контекст для текущего режима пользователя"""
+    if user_id not in user_contexts:
+        user_contexts[user_id] = {}
+
+    if current_mode not in user_contexts[user_id]:
+        # Определяем системные сообщения для разных режимов
+        if current_mode == "file_analysis":
+            system_message = (
+                "Ты помощник по анализу документов."
+                "Отвечай на вопросы касательно "
+                "содержимого предоставленного файла."
+            )
+        elif current_mode == "chat":
+            # Для режима чата в file_analysis используется другое сообщение
+            system_message = (
+                "You are a helpful assistant. "
+                "Use web search only when your knowledge may be outdated "
+                "or when the user explicitly asks for fresh data."
+            )
+        elif current_mode == "image":
+            system_message = "Ты помогаешь генерировать изображения."
+        elif current_mode == "edit":
+            system_message = (
+                "Ты помогаешь редактировать изображения с помощью Gemini."
+                )
+        else:
+            system_message = "Ты помощник."
+
+        # Инициализируем контекст с системным сообщением
+        user_contexts[user_id][current_mode] = [
+            {"role": "system", "content": system_message}
+        ]
+
+
 async def handle_message_or_voice(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
@@ -905,7 +939,8 @@ async def handle_message_or_voice(
                 # Truncate the extracted text and inform the user
                 truncated_extracted_text = extracted_text[:max_chars]
                 await update.message.reply_text(
-                    f"📝 Объем файла превышает лимит. Использую первую часть текста ({max_chars} символов) для анализа."
+                    f"📝 Объем файла превышает лимит. Использую первую "
+                    f"часть текста ({max_chars} сим.) для анализа."
                 )
             else:
                 truncated_extracted_text = extracted_text
@@ -948,37 +983,8 @@ async def handle_message_or_voice(
                 return  # ❌ Прерываем выполнение, если монет не хватает
             # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
 
-            # Инициализация контекста для текущего режима
             # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА
-            if user_id not in user_contexts:
-                user_contexts[user_id] = {}
-
-            if current_mode not in user_contexts[user_id]:
-                system_messages = {
-                    "chat": (
-                        "You are a helpful assistant. "
-                        "Use web search only when your knowledge may be outdated "
-                        "or when the user explicitly asks for fresh data."
-                        ),
-                    "image": "Ты помогаешь генерировать изображения.",
-                    "edit": (
-                        "Ты помогаешь редактировать "
-                        "изображения с помощью Gemini."
-                        ),
-                    "file_analysis": (
-                        "Ты помощник по анализу документов."
-                        "Отвечай на вопросы касательно "
-                        "содержимого предоставленного файла."
-                        ),
-                }
-                # Получаем системное сообщение для текущего режима
-                system_content = system_messages.get(
-                    current_mode, "Ты помощник."
-                )
-                # Инициализируем контекст
-                user_contexts[user_id][current_mode] = [
-                    {"role": "system", "content": system_content}
-                ]
+            initialize_user_context(user_id, current_mode)
 
             # Prepare messages with truncated history
             # using the augmented question
@@ -1147,6 +1153,10 @@ async def handle_message_or_voice(
     else:
         return  # Не текст и не голос
 
+    # Инициализация контекста для текущего режима
+    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
+    initialize_user_context(user_id, current_mode)
+
     # Обработка в зависимости от режима
     if current_mode == "image":
         # Режим генерации изображений
@@ -1166,33 +1176,6 @@ async def handle_message_or_voice(
             dbbot.log_action(user_id, current_mode, log_text, 0, balance)
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
-
-    # Инициализация контекста для текущего режима
-    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
-    if user_id not in user_contexts:
-        user_contexts[user_id] = {}
-
-    if current_mode not in user_contexts[user_id]:
-        system_messages = {
-            "chat": (
-                "Ты дружелюбный Telegram-бот, "
-                " отвечай понятно и по существу."
-            ),
-            "image": "Ты помогаешь генерировать изображения.",
-            "edit": "Ты помогаешь редактировать изображения с помощью Gemini.",
-        }
-        # Получаем системное сообщение для текущего режима
-        system_content = system_messages.get(current_mode, "Ты помощник.")
-        # Инициализируем контекст
-        user_contexts[user_id][current_mode] = [
-            {"role": "system", "content": system_content}
-        ]
-    # Обычный режим — добавляем сообщение пользователя
-    """
-    messages = user_contexts[user_id][current_mode] + [
-        {"role": "user", "content": user_message}
-        ]
-    """
 
     # Проверяем и ограничиваем количество токенов
     model_name = MODELS.get(current_mode)
@@ -1489,7 +1472,7 @@ def main():
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
     app.add_handler(
         CommandHandler("ai_file", ai_file_command)
-    )  # Add the new file analysis command
+        )
     app.add_handler(CommandHandler("billing", billing))
     app.add_handler(CommandHandler("clear", clear_context))
 
