@@ -1,9 +1,6 @@
 import atexit
-
 import os
-
 from dotenv import load_dotenv
-
 from openai import OpenAI
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -20,24 +17,18 @@ from telegram.ext import (
 from telegram.helpers import escape_markdown
 
 from PIL import Image
-
 import io
-
 import google.generativeai as genai
-
 import dbbot
 import token_utils
+import file_utils
+import coins_utils
+import models_config
 
 # File processing imports
-import PyPDF2
-from docx import Document
-import pandas as pd
-import xlrd  # noqa  # Used indirectly via pandas
+# (now in file_utils.py)
 # OCR imports
-import pytesseract
-from PIL import Image as PILImage
-import fitz  # PyMuPDF
-import tempfile
+# (now in file_utils.py)
 
 # Загрузить переменные из файла .env
 load_dotenv()
@@ -47,22 +38,6 @@ OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
-
-# Модели для разных режимов
-MODELS = {
-    "chat": "gpt-5.1",
-    "image": "dall-e-3",
-    "edit": "gemini-2.5-flash-preview-image",
-    "file_analysis": "gpt-5.1",
-}
-
-# Cost per message
-COST_PER_MESSAGE = {
-    "chat": 2,
-    "image": 5,
-    "edit": 6,
-    "file_analysis": 3,
-    }
 
 # Инициализация клиентов OpenAI для разных режимов
 client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
@@ -391,7 +366,7 @@ async def download_and_convert_image(
 
 async def generate_image(prompt: str) -> str:
     """Генерирует изображение с помощью DALL-E"""
-    model_name = MODELS["image"]  # Используем константу
+    model_name = models_config.MODELS["image"]  # Используем константу
     # Проверяем длину промпта на токены (ограничение для DALL-E)
     prompt_tokens = token_utils.token_counter.count_openai_tokens(
         prompt, model_name
@@ -421,7 +396,7 @@ async def edit_image_with_gemini(
     original_image: io.BytesIO, prompt: str
 ) -> str:
     """Редактирует изображение с помощью Gemini 2.5 Flash"""
-    model_name = MODELS["edit"]  # Используем константу
+    model_name = models_config.MODELS["edit"]  # Используем константу
     try:
         # Проверяем длину промпта на токены
         prompt_tokens = token_utils.token_counter.count_openai_tokens(
@@ -494,35 +469,6 @@ async def transcribe_voice(file_path: str) -> str:
     return transcription.text
 
 
-def spend_coins(
-    user_id: int,
-    cost: int,
-    coins: int,
-    giftcoins: int,
-    current_mode,
-    user_message,
-    reply,
-):
-    """--- ✅ Списываем монеты и записываем лог ---
-    Если основных монет не хватило — списываем из подарочных
-    """
-    balance = coins + giftcoins
-    remaining_cost = cost
-    if coins >= remaining_cost:
-        dbbot.change_all_coins(user_id, -remaining_cost, 0)
-    else:
-        # Сначала списываем с основных
-        remaining_cost -= coins
-        dbbot.change_all_coins(user_id, -coins, -remaining_cost)
-    # --- ✅ СПИСАНИЕ ЗАВЕРШЕНО ---
-    balance = balance - cost
-    # LOGGING ====================
-    log_text = f""" Запрос: {user_message}
-        Ответ: {reply}
-        """
-    dbbot.log_action(user_id, current_mode, log_text, -cost, balance)
-
-
 def ask_gpt51_with_web_search(
     query: str, enable_web_search: bool = True
 ) -> str:
@@ -583,181 +529,6 @@ def ask_gpt51_with_web_search(
     return response.output_text
 
 
-def get_file_extension(filename: str) -> str:
-    """Get file extension from filename"""
-    return os.path.splitext(filename)[1]
-
-
-async def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from PDF file"""
-    try:
-        with open(file_path, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        return text
-    except Exception as e:
-        raise Exception(f"Error processing PDF: {str(e)}")
-
-
-async def extract_text_from_docx(file_path: str) -> str:
-    """Extract text from DOCX file"""
-    try:
-        doc = Document(file_path)
-        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
-        return text
-    except Exception as e:
-        raise Exception(f"Error processing DOCX: {str(e)}")
-
-
-async def extract_text_from_txt(file_path: str) -> str:
-    """Extract text from TXT file"""
-    try:
-        with open(file_path, "r", encoding="utf-8") as file:
-            return file.read()
-    except UnicodeDecodeError:
-        # Try with different encoding
-        with open(file_path, "r", encoding="latin-1") as file:
-            return file.read()
-    except Exception as e:
-        raise Exception(f"Error processing TXT: {str(e)}")
-
-
-async def extract_text_from_xlsx(file_path: str) -> str:
-    """Extract text from XLSX file"""
-    try:
-        df = pd.read_excel(file_path, sheet_name=None)  # Read all sheets
-        text = ""
-        for sheet_name, sheet_df in df.items():
-            text += f"Sheet: {sheet_name}\n"
-            text += sheet_df.to_string()
-            text += "\n\n"
-        return text
-    except Exception as e:
-        raise Exception(f"Error processing XLSX: {str(e)}")
-
-
-async def extract_text_from_xls(file_path: str) -> str:
-    """Extract text from XLS file"""
-    try:
-        df = pd.read_excel(
-            file_path, sheet_name=None, engine="xlrd"
-        )  # Read all sheets
-        text = ""
-        for sheet_name, sheet_df in df.items():
-            text += f"Sheet: {sheet_name}\n"
-            text += sheet_df.to_string()
-            text += "\n\n"
-        return text
-    except Exception as e:
-        raise Exception(f"Error processing XLS: {str(e)}")
-
-
-async def extract_text_from_image(file_path: str) -> str:
-    """Extract text from image file using OCR"""
-    try:
-        # Open the image file
-        image = PILImage.open(file_path)
-
-        # Use pytesseract to extract text from the image
-        text = pytesseract.image_to_string(
-            image, lang="eng+rus"
-        )  # Support English and Russian
-        return text
-    except Exception as e:
-        raise Exception(f"Error performing OCR on image: {str(e)}")
-
-
-async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
-    """Extract text from PDF file with OCR fallback for scanned PDFs"""
-    try:
-        # First try to extract text directly from PDF
-        with open(file_path, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            text = ""
-            has_text = False
-
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                text += page_text + "\n"
-
-                # Check if the page contains substantial text content
-                if page_text.strip():
-                    has_text = True
-
-        # If the PDF doesn't have much text (likely scanned), use OCR
-        if (
-            not has_text or len(text.strip()) < 100
-        ):  # Threshold to determine if OCR is needed
-            # Use PyMuPDF with OCR
-            doc = fitz.open(file_path)
-            text = ""
-
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-
-                # Try to extract text first
-                page_text = page.get_text()
-
-                # If page text is minimal, try OCR
-                if len(page_text.strip()) < 50:  # If less than 50 characters
-                    # Convert page to image and apply OCR
-                    mat = fitz.Matrix(2.0, 2.0)  # Scale for better OCR quality
-                    pix = page.get_pixmap(matrix=mat)
-
-                    # Convert to PIL Image
-                    img_data = pix.tobytes("png")
-                    with tempfile.NamedTemporaryFile(
-                        suffix=".png", delete=False
-                    ) as temp_img:
-                        temp_img.write(img_data)
-                        temp_img_path = temp_img.name
-
-                    try:
-                        page_text = pytesseract.image_to_string(
-                            PILImage.open(temp_img_path), lang="eng+rus"
-                        )
-                    finally:
-                        # Clean up temporary image file
-                        if os.path.exists(temp_img_path):
-                            os.remove(temp_img_path)
-
-                text += page_text + "\n"
-
-            doc.close()
-
-        return text
-    except Exception as e:
-        raise Exception(f"Error processing PDF with OCR: {str(e)}")
-
-
-async def process_uploaded_file(file_path: str, file_extension: str) -> str:
-    """Process uploaded file based on its extension and return extracted text
-    """
-    if file_extension.lower() == ".pdf":
-        return await extract_text_from_pdf_with_ocr(file_path)
-    elif file_extension.lower() in [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".bmp",
-        ".tiff",
-        ".webp",
-    ]:
-        return await extract_text_from_image(file_path)
-    elif file_extension.lower() == ".docx":
-        return await extract_text_from_docx(file_path)
-    elif file_extension.lower() == ".txt":
-        return await extract_text_from_txt(file_path)
-    elif file_extension.lower() == ".xlsx":
-        return await extract_text_from_xlsx(file_path)
-    elif file_extension.lower() == ".xls":
-        return await extract_text_from_xls(file_path)
-    else:
-        raise Exception(f"Unsupported file format: {file_extension}")
-
-
 def initialize_user_context(user_id: int, current_mode: str):
     """Инициализирует контекст для текущего режима пользователя"""
     if user_id not in user_contexts:
@@ -783,7 +554,7 @@ def initialize_user_context(user_id: int, current_mode: str):
         elif current_mode == "edit":
             system_message = (
                 "Ты помогаешь редактировать изображения с помощью Gemini."
-                )
+            )
         else:
             system_message = "Ты помощник."
 
@@ -811,25 +582,14 @@ async def handle_message_or_voice(
             file = await context.bot.get_file(update.message.document.file_id)
 
             # Determine file extension
-            file_ext = get_file_extension(update.message.document.file_name)
-            supported_extensions = [
-                ".pdf",
-                ".docx",
-                ".txt",
-                ".xlsx",
-                ".xls",
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".bmp",
-                ".tiff",
-                ".webp",
-            ]
-
-            if file_ext.lower() not in supported_extensions:
+            file_ext = file_utils.get_file_extension(
+                update.message.document.file_name
+            )
+            if file_ext.lower() not in file_utils.SUPPORTED_EXTENSIONS:
                 await update.message.reply_text(
                     f"❌Неверный формат."
-                    f" Поддерживаются: {', '.join(supported_extensions)}"
+                    f" Поддерживаются: "
+                    f"{', '.join(file_utils.SUPPORTED_EXTENSIONS)}"
                 )
                 return
 
@@ -845,7 +605,7 @@ async def handle_message_or_voice(
                     "📄 Извлекаю текст из файла..."
                 )
 
-                extracted_text = await process_uploaded_file(
+                extracted_text = await file_utils.process_uploaded_file(
                     file_path, file_ext
                 )
 
@@ -876,7 +636,7 @@ async def handle_message_or_voice(
             # Get the highest resolution photo
             file = await context.bot.get_file(update.message.photo[-1].file_id)
 
-            # Determine file extension - for photos sent as images, 
+            # Determine file extension - for photos sent as images,
             # assume it's an image file
             file_ext = ".jpg"  # Telegram converts photos to JPEG
 
@@ -892,7 +652,9 @@ async def handle_message_or_voice(
                     "🔍 Выполняю OCR распознавание изображения..."
                 )
 
-                extracted_text = await extract_text_from_image(file_path)
+                extracted_text = await file_utils.extract_text_from_image(
+                    file_path
+                )
 
                 # Store extracted text for later use
                 if user_id not in user_file_data:
@@ -927,10 +689,10 @@ async def handle_message_or_voice(
 
             # Limit the extracted text length to prevent connection errors
             # Calculate max characters based on model's token limit
-            model_name = MODELS.get(current_mode)
+            model_name = models_config.MODELS.get(current_mode)
             max_tokens = token_utils.get_token_limit(model_name)
 
-            # Rough estimation: 1 token ~ 4 characters, 
+            # Rough estimation: 1 token ~ 4 characters,
             # reserve tokens for response and context
             # 1500 reserved for context
             max_chars = min(len(extracted_text), (max_tokens - 1500) * 3)
@@ -949,37 +711,16 @@ async def handle_message_or_voice(
             augmented_question = (
                 f"Файл содержит следующий текст:"
                 f" {truncated_extracted_text}\n\nВопрос: {user_message}"
-                )
+            )
 
             # Continue with standard processing using the augmented question
             # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-            cost = COST_PER_MESSAGE.get(current_mode)
-            user_data = dbbot.get_user(user_id)
-            if not user_data:
-                await update.message.reply_text(
-                    "❌ Ошибка: Не удалось получить данные пользователя."
+            user_data, coins, giftcoins, balance, cost = (
+                await coins_utils.check_user_coins(
+                    user_id, current_mode, context
                 )
-                return
-
-            # Считаем общее количество монет
-            coins = user_data["coins"]
-            giftcoins = user_data["giftcoins"]
-            balance = coins + giftcoins
-            # Проверяем, хватает ли монет
-            if balance < cost:
-                # LOGGING ====================
-                log_text = f""" У пользователя недостаточно средств
-                    Режим: {current_mode}
-                    Стоимость: {cost}
-                    Баланс: {balance}
-                    """
-                dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-                await update.message.reply_text(
-                    f"⚠️ У вас недостаточно монет. "
-                    f"Стоимость запроса: {cost} монет.\n"
-                    f"Ваш баланс: {balance} монет.\n"
-                    f"Пополните счёт в /billing"
-                )
+            )
+            if user_data is None:
                 return  # ❌ Прерываем выполнение, если монет не хватает
             # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
 
@@ -988,7 +729,7 @@ async def handle_message_or_voice(
 
             # Prepare messages with truncated history
             # using the augmented question
-            model_name = MODELS.get(current_mode)
+            model_name = models_config.MODELS.get(current_mode)
             truncated_history = token_utils.truncate_messages_for_token_limit(
                 user_contexts[user_id][current_mode],
                 model=model_name,
@@ -1038,7 +779,7 @@ async def handle_message_or_voice(
                 )
 
                 # Отправляем ответ
-                # Экранируем специальные символы Markdown, 
+                # Экранируем специальные символы Markdown,
                 # чтобы избежать ошибок
                 safe_reply = escape_markdown(reply, version=2)
                 await update.message.reply_text(
@@ -1046,7 +787,7 @@ async def handle_message_or_voice(
                 )
 
                 # Списываем монеты и записываем лог
-                spend_coins(
+                coins_utils.spend_coins(
                     user_id,
                     cost,
                     coins,
@@ -1088,35 +829,12 @@ async def handle_message_or_voice(
         return  # End here for file analysis mode
 
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-    # Определяем стоимость в зависимости от режима
-    cost = COST_PER_MESSAGE.get(current_mode)
-    # Получаем данные пользователя
-    user_data = dbbot.get_user(user_id)
-    if not user_data:
-        await update.message.reply_text(
-            "❌ Ошибка: Не удалось получить данные пользователя."
+    user_data, coins, giftcoins, balance, cost = (
+        await coins_utils.check_user_coins(
+            user_id, current_mode, context
         )
-        return
-
-    # Считаем общее количество монет
-    coins = user_data["coins"]
-    giftcoins = user_data["giftcoins"]
-    balance = coins + giftcoins
-    # Проверяем, хватает ли монет
-    if balance < cost:
-        # LOGGING ====================
-        log_text = f""" У пользователя недостаточно средств
-            Режим: {current_mode}
-            Стоимость: {cost}
-            Баланс: {balance}
-            """
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-        await update.message.reply_text(
-            f"⚠️ У вас недостаточно монет. "
-            f"Стоимость запроса: {cost} монет.\n"
-            f"Ваш баланс: {balance} монет.\n"
-            f"Пополните счёт в /billing"
-        )
+    )
+    if user_data is None:
         return  # ❌ Прерываем выполнение, если монет не хватает
     # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
 
@@ -1167,7 +885,7 @@ async def handle_message_or_voice(
                 image_url, caption=f"Сгенерировано по запросу: {user_message}"
             )
             # Списываем монеты и записываем лог
-            spend_coins(
+            coins_utils.spend_coins(
                 user_id, cost, coins, giftcoins, current_mode, user_message, ""
             )
         except Exception as e:
@@ -1177,81 +895,128 @@ async def handle_message_or_voice(
             await update.message.reply_text(f"⚠️ {str(e)}")
         return
 
-    # Проверяем и ограничиваем количество токенов
-    model_name = MODELS.get(current_mode)
-    truncated_history = token_utils.truncate_messages_for_token_limit(
-        user_contexts[user_id][current_mode],
-        model=model_name,
-        reserve_tokens=1500,
-    )
-    messages = truncated_history + [{"role": "user", "content": user_message}]
-
-    # Дополнительно ограничиваем длину истории
-    if len(messages) > MAX_CONTEXT_MESSAGES:
-        messages = messages[-MAX_CONTEXT_MESSAGES:]
-
-    try:
-        # Используем клиент чата
-        # Проверяем, что последнее сообщение - это от пользователя
-        if messages and messages[-1]["role"] == "user":
-            # Проверяем токены перед отправкой
-            token_counter = token_utils.token_counter
-            total_tokens = token_counter.count_openai_messages_tokens(
-                messages, model_name
+    # Для режима chat используем специальную функцию с возможностью веб-поиска
+    if current_mode == "chat":
+        try:
+            # Используем функцию с веб-поиском для режима chat
+            reply = ask_gpt51_with_web_search(
+                user_message, enable_web_search=True
             )
-            max_tokens = token_utils.get_token_limit(model_name)
 
-            if total_tokens > max_tokens:
-                # Обрезаем сообщения до приемлемого размера
-                messages = token_utils.truncate_messages_for_token_limit(
-                    messages,
-                    model=model_name,
-                    reserve_tokens=1500,  # Оставляем место для ответа
+            # Обновляем контекст: добавляем и запрос, и ответ
+            user_contexts[user_id][current_mode].append(
+                {"role": "user", "content": user_message}
+            )
+            user_contexts[user_id][current_mode].append(
+                {"role": "assistant", "content": reply}
+            )
+
+            # Отправляем ответ
+            # Экранируем специальные символы Markdown, чтобы избежать ошибок
+            safe_reply = escape_markdown(reply, version=2)
+            await update.message.reply_text(
+                safe_reply, parse_mode="MarkdownV2"
                 )
 
-        response = client_chat.chat.completions.create(
-            model=model_name,  # Используем модель из константы
-            messages=messages,
-        )
-        reply = response.choices[0].message.content
-
-        # Обновляем контекст: добавляем и запрос, и ответ
-        user_contexts[user_id][current_mode].append(
-            {"role": "assistant", "content": reply}
-        )
-
-        # Отправляем ответ
-        # Экранируем специальные символы Markdown, чтобы избежать ошибок
-        safe_reply = escape_markdown(reply, version=2)
-        await update.message.reply_text(safe_reply, parse_mode="MarkdownV2")
-
-        # Списываем монеты и записываем лог
-        spend_coins(
-            user_id,
-            cost,
-            coins,
-            giftcoins,
-            current_mode,
-            user_message,
-            safe_reply,
-        )
-    except Exception as e:
-        # Обработка ошибки "Message is too long" и других
-        error_msg = str(e)
-        if "too long" in error_msg.lower() or "token" in error_msg.lower():
-            # LOGGING ====================
-            log_text = f"Ошибка: Сообщение слишком длинное: {str(e)}"
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-            await update.message.reply_text(
-                "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
+            # Списываем монеты и записываем лог
+            coins_utils.spend_coins(
+                user_id,
+                cost,
+                coins,
+                giftcoins,
+                current_mode,
+                user_message,
+                safe_reply,
             )
-        else:
+        except Exception as e:
             # LOGGING ====================
             log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
             dbbot.log_action(user_id, current_mode, log_text, 0, balance)
             await update.message.reply_text(
                 "⚠️ Ошибка при обращении к ChatGPT."
             )
+            return
+    else:
+        # Для других режимов (image, edit) используем обычную логику
+        # Проверяем и ограничиваем количество токенов
+        model_name = models_config.MODELS.get(current_mode)
+        truncated_history = token_utils.truncate_messages_for_token_limit(
+            user_contexts[user_id][current_mode],
+            model=model_name,
+            reserve_tokens=1500,
+        )
+        messages = truncated_history + [
+            {"role": "user", "content": user_message}
+            ]
+
+        # Дополнительно ограничиваем длину истории
+        if len(messages) > MAX_CONTEXT_MESSAGES:
+            messages = messages[-MAX_CONTEXT_MESSAGES:]
+
+        try:
+            # Используем клиент чата
+            # Проверяем, что последнее сообщение - это от пользователя
+            if messages and messages[-1]["role"] == "user":
+                # Проверяем токены перед отправкой
+                token_counter = token_utils.token_counter
+                total_tokens = token_counter.count_openai_messages_tokens(
+                    messages, model_name
+                )
+                max_tokens = token_utils.get_token_limit(model_name)
+
+                if total_tokens > max_tokens:
+                    # Обрезаем сообщения до приемлемого размера
+                    messages = token_utils.truncate_messages_for_token_limit(
+                        messages,
+                        model=model_name,
+                        reserve_tokens=1500,  # Оставляем место для ответа
+                    )
+
+            response = client_chat.chat.completions.create(
+                model=model_name,  # Используем модель из константы
+                messages=messages,
+            )
+            reply = response.choices[0].message.content
+
+            # Обновляем контекст: добавляем и запрос, и ответ
+            user_contexts[user_id][current_mode].append(
+                {"role": "assistant", "content": reply}
+            )
+
+            # Отправляем ответ
+            # Экранируем специальные символы Markdown, чтобы избежать ошибок
+            safe_reply = escape_markdown(reply, version=2)
+            await update.message.reply_text(
+                safe_reply, parse_mode="MarkdownV2"
+                )
+
+            # Списываем монеты и записываем лог
+            coins_utils.spend_coins(
+                user_id,
+                cost,
+                coins,
+                giftcoins,
+                current_mode,
+                user_message,
+                safe_reply,
+            )
+        except Exception as e:
+            # Обработка ошибки "Message is too long" и других
+            error_msg = str(e)
+            if "too long" in error_msg.lower() or "token" in error_msg.lower():
+                # LOGGING ====================
+                log_text = f"Ошибка: Сообщение слишком длинное: {str(e)}"
+                dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+                await update.message.reply_text(
+                    "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
+                )
+            else:
+                # LOGGING ====================
+                log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
+                dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+                await update.message.reply_text(
+                    "⚠️ Ошибка при обращении к ChatGPT."
+                )
 
 
 async def handle_edit_mode(
@@ -1470,9 +1235,7 @@ def main():
     app.add_handler(CommandHandler("ai", ai_command))
     app.add_handler(CommandHandler("ai_image", ai_image_command))
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
-    app.add_handler(
-        CommandHandler("ai_file", ai_file_command)
-        )
+    app.add_handler(CommandHandler("ai_file", ai_file_command))
     app.add_handler(CommandHandler("billing", billing))
     app.add_handler(CommandHandler("clear", clear_context))
 

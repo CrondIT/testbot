@@ -23,9 +23,12 @@ class TokenCounter:
         """
         try:
             if model not in self.openai_encoders:
-                self.openai_encoders[model] = tiktoken.encoding_for_model(
-                    model
-                )
+                # Проверяем, содержит ли модель признаки GPT-4 или GPT-5
+                if "gpt-4" in model or "gpt-5" in model:
+                    # Для GPT-4 и GPT-5 моделей используем cl100k_base
+                    self.openai_encoders[model] = tiktoken.get_encoding("cl100k_base")
+                else:
+                    self.openai_encoders[model] = tiktoken.encoding_for_model(model)
             encoder = self.openai_encoders[model]
             return len(encoder.encode(text))
         except Exception as e:
