@@ -21,20 +21,26 @@ class TokenCounter:
         """
         Count tokens for OpenAI models using tiktoken
         """
-        try:
-            if model not in self.openai_encoders:
-                # Проверяем, содержит ли модель признаки GPT-4 или GPT-5
-                if "gpt-4" in model or "gpt-5" in model:
-                    # Для GPT-4 и GPT-5 моделей используем cl100k_base
-                    self.openai_encoders[model] = tiktoken.get_encoding("cl100k_base")
-                else:
+        # Проверяем, содержит ли модель признаки GPT-4 или GPT-5
+        if "gpt-4" in model or "gpt-5" in model:
+            # Для GPT-4 и GPT-5 моделей используем cl100k_base
+            try:
+                encoder = tiktoken.get_encoding("cl100k_base")
+                return len(encoder.encode(text))
+            except Exception as e:
+                # Fallback: rough estimation (1 token ~ 4 characters)
+                print(f"Ошибка count_openai_tokens: {e}")
+                return len(text) // 4
+        else:
+            try:
+                if model not in self.openai_encoders:
                     self.openai_encoders[model] = tiktoken.encoding_for_model(model)
-            encoder = self.openai_encoders[model]
-            return len(encoder.encode(text))
-        except Exception as e:
-            # Fallback: rough estimation (1 token ~ 4 characters)
-            print(f"Ошибка count_openai_tokens: {e}")
-            return len(text) // 4
+                encoder = self.openai_encoders[model]
+                return len(encoder.encode(text))
+            except Exception as e:
+                # Fallback: rough estimation (1 token ~ 4 characters)
+                print(f"Ошибка count_openai_tokens: {e}")
+                return len(text) // 4
 
     def count_openai_messages_tokens(
         self,

@@ -116,13 +116,25 @@ async def extract_text_from_image(file_path: str) -> str:
         # Open the image file
         image = PILImage.open(file_path)
 
+        # Check if Tesseract is available by running a simple test
+        import subprocess
+        try:
+            subprocess.run(["tesseract", "--version"],
+                          capture_output=True, check=True, timeout=5)
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            return "OCR processing unavailable. Tesseract not installed or not in PATH."
+
         # Use pytesseract to extract text from the image
         text = pytesseract.image_to_string(
             image, lang="eng+rus"
         )  # Support English and Russian
         return text
     except Exception as e:
-        raise Exception(f"Error performing OCR on image: {str(e)}")
+        # Handle case when Tesseract is not installed or not working
+        if "tesseract" in str(e).lower() or "not found" in str(e).lower():
+            return "OCR processing unavailable. Tesseract not installed or not in PATH."
+        else:
+            raise Exception(f"Error performing OCR on image: {str(e)}")
 
 
 async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
@@ -171,9 +183,20 @@ async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
                         temp_img_path = temp_img.name
 
                     try:
-                        page_text = pytesseract.image_to_string(
-                            PILImage.open(temp_img_path), lang="eng+rus"
-                        )
+                        # Check if Tesseract is available by running a simple test
+                        import subprocess
+                        try:
+                            subprocess.run(["tesseract", "--version"],
+                                          capture_output=True, check=True, timeout=5)
+                            # Use pytesseract to extract text from the image
+                            page_text = pytesseract.image_to_string(
+                                PILImage.open(temp_img_path), lang="eng+rus"
+                            )
+                        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+                            page_text = f"Page {page_num + 1}: OCR processing unavailable. Tesseract not installed or not in PATH."
+                    except OSError:
+                        # Handle case when Tesseract is not installed
+                        page_text = f"Page {page_num + 1}: OCR processing unavailable. Tesseract not installed or not in PATH."
                     finally:
                         # Clean up temporary image file
                         if os.path.exists(temp_img_path):
@@ -185,7 +208,19 @@ async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
 
         return text
     except Exception as e:
-        raise Exception(f"Error processing PDF with OCR: {str(e)}")
+        # Fallback to just text extraction without OCR
+        try:
+            with open(file_path, "rb") as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                text = ""
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
+                if text.strip():
+                    return text
+                else:
+                    raise Exception(f"Error processing PDF with OCR: {str(e)}")
+        except Exception:
+            raise Exception(f"Error processing PDF with OCR: {str(e)}")
 
 
 async def extract_text_from_doc(file_path: str) -> str:
