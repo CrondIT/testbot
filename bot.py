@@ -156,6 +156,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         Доступные команды:
         /ai - Чат с ИИ
+        /file_analysis - Анализ файлов
         /ai_image - Генерация изображений
         /ai_edit - Редактирование изображений
         /billing - Управление счетом

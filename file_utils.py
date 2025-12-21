@@ -119,10 +119,17 @@ async def extract_text_from_image(file_path: str) -> str:
         # Check if Tesseract is available by running a simple test
         import subprocess
         try:
-            subprocess.run(["tesseract", "--version"],
-                          capture_output=True, check=True, timeout=5)
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
-            return "OCR processing unavailable. Tesseract not installed or not in PATH."
+            subprocess.run(
+                ["tesseract", "--version"],
+                capture_output=True,
+                check=True, timeout=5
+                        )
+        except (
+                subprocess.TimeoutExpired,
+                subprocess.CalledProcessError,
+                FileNotFoundError
+                ):
+            return "OCR unavailable. Tesseract not installed or not in PATH."
 
         # Use pytesseract to extract text from the image
         text = pytesseract.image_to_string(
@@ -132,7 +139,7 @@ async def extract_text_from_image(file_path: str) -> str:
     except Exception as e:
         # Handle case when Tesseract is not installed or not working
         if "tesseract" in str(e).lower() or "not found" in str(e).lower():
-            return "OCR processing unavailable. Tesseract not installed or not in PATH."
+            return "OCR unavailable. Tesseract not installed or not in PATH."
         else:
             raise Exception(f"Error performing OCR on image: {str(e)}")
 
@@ -183,20 +190,35 @@ async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
                         temp_img_path = temp_img.name
 
                     try:
-                        # Check if Tesseract is available by running a simple test
+                        # Check if Tesseract is available 
+                        # by running a simple test
                         import subprocess
                         try:
-                            subprocess.run(["tesseract", "--version"],
-                                          capture_output=True, check=True, timeout=5)
+                            subprocess.run(
+                                ["tesseract", "--version"],
+                                capture_output=True,
+                                check=True,
+                                timeout=5
+                                )
                             # Use pytesseract to extract text from the image
                             page_text = pytesseract.image_to_string(
                                 PILImage.open(temp_img_path), lang="eng+rus"
                             )
-                        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
-                            page_text = f"Page {page_num + 1}: OCR processing unavailable. Tesseract not installed or not in PATH."
+                        except (
+                                subprocess.TimeoutExpired,
+                                subprocess.CalledProcessError,
+                                FileNotFoundError
+                                ):
+                            page_text = (
+                                f"Page {page_num + 1}: OCR unavailable. "
+                                f"Tesseract not installed or not in PATH."
+                                )
                     except OSError:
                         # Handle case when Tesseract is not installed
-                        page_text = f"Page {page_num + 1}: OCR processing unavailable. Tesseract not installed or not in PATH."
+                        page_text = (
+                            f"Page {page_num + 1}: OCR unavailable. "
+                            f"Tesseract not installed or not in PATH."
+                            )
                     finally:
                         # Clean up temporary image file
                         if os.path.exists(temp_img_path):

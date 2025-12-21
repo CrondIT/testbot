@@ -34,7 +34,9 @@ class TokenCounter:
         else:
             try:
                 if model not in self.openai_encoders:
-                    self.openai_encoders[model] = tiktoken.encoding_for_model(model)
+                    self.openai_encoders[model] = tiktoken.encoding_for_model(
+                        model
+                        )
                 encoder = self.openai_encoders[model]
                 return len(encoder.encode(text))
             except Exception as e:
