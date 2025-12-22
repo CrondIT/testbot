@@ -1,7 +1,6 @@
 import atexit
 import os
 from dotenv import load_dotenv
-from openai import OpenAI
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -25,34 +24,22 @@ import file_utils
 import coins_utils
 import models_config
 
-# File processing imports
-# (now in file_utils.py)
-# OCR imports
-# (now in file_utils.py)
+# File processing imports OCR imports in file_utils.py
 
 # Загрузить переменные из файла .env
 load_dotenv()
-
-# Получаем токены для разных режимов
-OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
-OPENAI_API_KEY_IMAGE = os.getenv("OPENAI_API_KEY_IMAGE")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Load only the TELEGRAM_BOT_TOKEN
+# as it's specifically needed for running the bot
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 
-# Инициализация клиентов OpenAI для разных режимов
-client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
-client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
-
-# Инициализация клиента Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-
+client_chat = models_config.client_chat
+client_image = models_config.client_image
 
 user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
 user_modes = {}  # Хранит текущий режим для каждого пользователя
 user_edit_data = {}  # Хранит данные для редактирования изображений
 user_file_data = {}  # Хранит данные для анализа файлов
 MAX_CONTEXT_MESSAGES = 4
-
 
 # --- Файл для хранения PID для котроля что процесс уже запущен- ---
 PID_FILE = "bot.pid"
@@ -81,37 +68,6 @@ def check_pid():
 # --- окончание проверки PID  для котроля что процесс уже запущен---
 
 
-async def get_gemini_models_info() -> str:
-    """
-    Возвращает информацию о доступных моделях Gemini в виде строки.
-    """
-    try:
-        models = genai.list_models()
-        lines = ["🤖 Доступные модели Gemini:\n"]
-        for model in models:
-            model_id = model.name.split("/")[-1]
-            input_tokens = model.input_token_limit
-            output_tokens = model.output_token_limit
-            methods = ", ".join(model.supported_generation_methods)
-            temp = (
-                f"{model.temperature:.1f}"
-                if model.temperature
-                else "не задана"
-            )
-
-            lines.append(
-                f"🔹 *{model_id}*"
-                f"\n   Вход: `{input_tokens}` токенов"
-                f"\n   Выход: `{output_tokens}` токенов"
-                f"\n   Режимы: `{methods}`"
-                f"\n   Температура: `{temp}`"
-                f"\n"
-            )
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Ошибка при получении моделей Gemini: `{str(e)}`"
-
-
 async def models_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Обработчик команды /models_gemini — показывает доступные модели Gemini.
@@ -119,26 +75,17 @@ async def models_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔄 Запрашиваю список моделей у Gemini...", parse_mode="Markdown"
     )
-    info = await get_gemini_models_info()
+    info = await models_config.get_gemini_models_info()
     safe_info = escape_markdown(info, version=2)
     await update.message.reply_text(safe_info, parse_mode="MarkdownV2")
 
 
-async def get_openai_models_info() -> str:
-    try:
-        # УБИРАЕМ await — вызов синхронный!
-        models = client_image.models.list()
-        lines = ["🤖 Доступные модели OpenAI:\n"]
-        for model in models:
-            lines.append(f"🔹 `{model.id}`")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"❌ Ошибка: `{e}`"
-
-
 async def models_openai(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Обработчик команды /models_openai — показывает доступные модели OpenAI.
+    """
     await update.message.reply_text("🔄 Запрашиваю список моделей у OpenAI...")
-    info = await get_openai_models_info()
+    info = await models_config.get_openai_models_info()
     safe_info = escape_markdown(info, version=2)
     await update.message.reply_text(safe_info, parse_mode="MarkdownV2")
 
@@ -470,66 +417,6 @@ async def transcribe_voice(file_path: str) -> str:
     return transcription.text
 
 
-def ask_gpt51_with_web_search(
-    query: str, enable_web_search: bool = True
-) -> str:
-    """
-    Задать вопрос GPT-5.1 с опциональным поиском в интернете.
-
-    :param query: Текст вопроса.
-    :param enable_web_search:
-        Если True — модель может использовать интернет-поиск.
-        Если False — только внутренние знания, без поиска.
-    :return: Текст ответа от модели.
-    """
-    # Проверяем длину запроса и ограничиваем его при необходимости
-    model_name = "gpt-5.1"
-    max_tokens = token_utils.get_token_limit(model_name)
-    query_tokens = token_utils.token_counter.count_openai_tokens(
-        query, model_name
-    )
-
-    if query_tokens > max_tokens:
-        # Обрезаем запрос до допустимого размера
-        avg_token_size = 4  # средний размер токена в символах
-        max_chars = max_tokens * avg_token_size
-        query = query[:max_chars]
-
-    # Подготовка инструментов: только если разрешён поиск
-    tools = (
-        [
-            {
-                "type": "web_search",
-                # Можно расширить: фильтры, язык, регион и т.п.
-            }
-        ]
-        if enable_web_search
-        else []
-    )
-
-    # Выбор поведения: использовать ли инструменты
-    tool_choice = "auto" if enable_web_search else "none"
-
-    response = client_chat.responses.create(
-        model="gpt-5.1",  # или "gpt-5.1-thinking"
-        tools=tools,
-        tool_choice=tool_choice,
-        input=query,
-        instructions=(
-            "You are a helpful assistant. "
-            "Use web search only when your knowledge may be outdated "
-            "or when the user explicitly asks for fresh data."
-        ),
-        temperature=0.4,
-        # include sources only if web search is enabled
-        include=(
-            ["web_search_call.action.sources"] if enable_web_search else []
-        ),
-    )
-
-    return response.output_text
-
-
 def initialize_user_context(user_id: int, current_mode: str):
     """Инициализирует контекст для текущего режима пользователя"""
     if user_id not in user_contexts:
@@ -574,6 +461,46 @@ async def handle_message_or_voice(
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
+
+    # Continue with standard processing using the augmented question
+    # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
+    user_data, coins, giftcoins, balance, cost = (
+        await coins_utils.check_user_coins(user_id, current_mode, context)
+    )
+    if user_data is None:
+        return  # ❌ Прерываем выполнение, если монет не хватает
+    # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
+
+    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА
+    initialize_user_context(user_id, current_mode)
+
+    # Проверяем, является ли сообщение голосовым
+    if update.message.voice:
+        # Скачиваем голосовое сообщение
+        voice_file = await context.bot.get_file(update.message.voice.file_id)
+        # Сохраняем его во временный файл
+        file_path = f"voice_{user_id}_{update.message.message_id}.ogg"
+        await voice_file.download_to_drive(file_path)
+
+        try:
+            # Преобразуем в текст
+            user_message = await transcribe_voice(file_path)
+            # Удаляем временный файл
+            os.remove(file_path)
+        except Exception as e:
+            # LOGGING ====================
+            log_text = "Не удалось распознать голосовое сообщение."
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+            print("Ошибка транскрибации:", e)
+            await update.message.reply_text(
+                "⚠️ Не удалось распознать голосовое сообщение."
+            )
+            return
+    elif update.message.text:
+        # Обычное текстовое сообщение
+        user_message = update.message.text.strip()
+    else:
+        return  # Не текст и не голос
 
     # Handle file uploads in file_analysis mode
     if current_mode == "file_analysis":
@@ -714,20 +641,6 @@ async def handle_message_or_voice(
                 f" {truncated_extracted_text}\n\nВопрос: {user_message}"
             )
 
-            # Continue with standard processing using the augmented question
-            # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-            user_data, coins, giftcoins, balance, cost = (
-                await coins_utils.check_user_coins(
-                    user_id, current_mode, context
-                )
-            )
-            if user_data is None:
-                return  # ❌ Прерываем выполнение, если монет не хватает
-            # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
-
-            # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА
-            initialize_user_context(user_id, current_mode)
-
             # Prepare messages with truncated history
             # using the augmented question
             model_name = models_config.MODELS.get(current_mode)
@@ -831,9 +744,7 @@ async def handle_message_or_voice(
 
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
     user_data, coins, giftcoins, balance, cost = (
-        await coins_utils.check_user_coins(
-            user_id, current_mode, context
-        )
+        await coins_utils.check_user_coins(user_id, current_mode, context)
     )
     if user_data is None:
         return  # ❌ Прерываем выполнение, если монет не хватает
@@ -844,35 +755,7 @@ async def handle_message_or_voice(
         await handle_edit_mode(update, context, user_id)
         return
 
-    # Проверяем, является ли сообщение голосовым
-    if update.message.voice:
-        # Скачиваем голосовое сообщение
-        voice_file = await context.bot.get_file(update.message.voice.file_id)
-        # Сохраняем его во временный файл
-        file_path = f"voice_{user_id}_{update.message.message_id}.ogg"
-        await voice_file.download_to_drive(file_path)
-
-        try:
-            # Преобразуем в текст
-            user_message = await transcribe_voice(file_path)
-            # Удаляем временный файл
-            os.remove(file_path)
-        except Exception as e:
-            # LOGGING ====================
-            log_text = "Не удалось распознать голосовое сообщение."
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-            print("Ошибка транскрибации:", e)
-            await update.message.reply_text(
-                "⚠️ Не удалось распознать голосовое сообщение."
-            )
-            return
-    elif update.message.text:
-        # Обычное текстовое сообщение
-        user_message = update.message.text.strip()
-    else:
-        return  # Не текст и не голос
-
-    # Инициализация контекста для текущего режима
+        # Инициализация контекста для текущего режима
     # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
     initialize_user_context(user_id, current_mode)
 
@@ -900,7 +783,7 @@ async def handle_message_or_voice(
     if current_mode == "chat":
         try:
             # Используем функцию с веб-поиском для режима chat
-            reply = ask_gpt51_with_web_search(
+            reply = models_config.ask_gpt51_with_web_search(
                 user_message, enable_web_search=True
             )
 
@@ -917,7 +800,7 @@ async def handle_message_or_voice(
             safe_reply = escape_markdown(reply, version=2)
             await update.message.reply_text(
                 safe_reply, parse_mode="MarkdownV2"
-                )
+            )
 
             # Списываем монеты и записываем лог
             coins_utils.spend_coins(
@@ -948,7 +831,7 @@ async def handle_message_or_voice(
         )
         messages = truncated_history + [
             {"role": "user", "content": user_message}
-            ]
+        ]
 
         # Дополнительно ограничиваем длину истории
         if len(messages) > MAX_CONTEXT_MESSAGES:
@@ -989,7 +872,7 @@ async def handle_message_or_voice(
             safe_reply = escape_markdown(reply, version=2)
             await update.message.reply_text(
                 safe_reply, parse_mode="MarkdownV2"
-                )
+            )
 
             # Списываем монеты и записываем лог
             coins_utils.spend_coins(
@@ -1125,11 +1008,12 @@ async def ai_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Как использовать:
 1. Отправьте файл в одном из поддерживаемых форматов:
-   • PDF (.pdf) - документы в формате PDF
-   • DOCX (.docx) - документы Word
-   • TXT (.txt) - текстовые файлы
-   • XLSX (.xlsx) - таблицы Excel
-   • XLS (.xls) - старые таблицы Excel
+   • PDF - документы в формате PDF
+   • DOC, DOCX - документы Word
+   • TXT - текстовые файлы
+   • XLS, XLSX - таблицы Excel
+   • PPT, PPTX - презентации Power Point
+   • ODF, ODS, ODP текст, таблицы и презентации OpenDocument
 
 2. Бот извлечет текст из файла и позволит вам задавать вопросы
 
