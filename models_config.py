@@ -1,5 +1,6 @@
 """Configuration for AI models used by the bot."""
 import os
+import io
 from dotenv import load_dotenv
 import google.generativeai as genai
 from openai import OpenAI
@@ -138,3 +139,100 @@ def ask_gpt51_with_web_search(
     )
 
     return response.output_text
+
+
+async def generate_image(prompt: str) -> str:
+    """Генерирует изображение с помощью DALL-E"""
+    model_name = MODELS["image"]  # Используем константу
+    # Проверяем длину промпта на токены (ограничение для DALL-E)
+    prompt_tokens = token_utils.token_counter.count_openai_tokens(
+        prompt, model_name
+    )
+    max_tokens = token_utils.get_token_limit(model_name)
+
+    if prompt_tokens > max_tokens:
+        # Обрезаем промпт до допустимого размера
+        avg_token_size = 4  # средний размер токена в символах
+        max_chars = max_tokens * avg_token_size
+        prompt = prompt[:max_chars]
+
+    try:
+        response = client_image.images.generate(
+            model=model_name,  # Используем константу
+            prompt=prompt,
+            size="1024x1024",
+            quality="standard",
+            n=1,
+        )
+        return response.data[0].url
+    except Exception as e:
+        raise Exception(f"Ошибка генерации изображения: {str(e)}")
+
+
+async def edit_image_with_gemini(
+    original_image: io.BytesIO, prompt: str
+) -> str:
+    """Редактирует изображение с помощью Gemini 2.5 Flash"""
+    model_name = MODELS["edit"]  # Используем константу
+    try:
+        # Проверяем длину промпта на токены
+        prompt_tokens = token_utils.token_counter.count_openai_tokens(
+            prompt, model_name
+        )
+        max_tokens = token_utils.get_token_limit(model_name)
+
+        if prompt_tokens > max_tokens:
+            # Обрезаем промпт до допустимого размера
+            avg_token_size = 4  # средний размер токена в символах
+            max_chars = max_tokens * avg_token_size
+            prompt = prompt[:max_chars]
+
+        # Подготовка изображения для Gemini
+        original_image.seek(0)
+        # Создаем модель Gemini
+        model = genai.GenerativeModel(model_name)
+        # Подготавливаем промпт для Gemini
+        gemini_prompt = f"""
+        Проанализируй это изображение и выполни следующие изменения: {prompt}
+        Важные инструкции:
+        1. Внеси именно те изменения, которые запрошены пользователем
+        2. Сохрани общий стиль и качество изображения
+        3. Если запрос неясен, уточни у пользователя
+        4. Верни только измененное изображение без дополнительного текста
+        """
+        # Отправляем изображение и промпт в Gemini
+        response = model.generate_content(
+            [
+                gemini_prompt,
+                {"mime_type": "image/png", "data": original_image.getvalue()},
+            ]
+        )
+        # Проверяем, содержит ли ответ изображение
+        if hasattr(response, "candidates") and response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "inline_data"):
+                    # Возвращаем данные изображения
+                    return part.inline_data.data
+                elif hasattr(part, "text"):
+                    # Если Gemini вернул текст вместо изображения
+                    raise Exception(
+                        f"""
+                        ИИ вернул текстовый ответ вместо изображения:
+                        {part.text}"""
+                    )
+        # Если не нашли изображение в ответе
+        raise Exception("Gemini не вернул изображение в ответе")
+    except Exception as e:
+        raise Exception(
+            f"Ошибка редактирования изображения с помощью ИИ: {str(e)}"
+        )
+
+
+async def transcribe_voice(file_path: str) -> str:
+    """Преобразует голосовое сообщение в текст с помощью Whisper API."""
+    with open(file_path, "rb") as audio_file:
+        transcription = client_chat.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+        )
+    return transcription.text

@@ -176,8 +176,8 @@ async def handle_message_or_voice(
 
     # Continue with standard processing using the augmented question
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-    user_data, coins, giftcoins, balance, cost = (
-        await check_user_coins(user_id, current_mode, context)
+    user_data, coins, giftcoins, balance, cost = await check_user_coins(
+        user_id, current_mode, context
     )
     if user_data is None:
         return  # ❌ Прерываем выполнение, если монет не хватает
@@ -196,7 +196,7 @@ async def handle_message_or_voice(
 
         try:
             # Преобразуем в текст
-            user_message = await transcribe_voice(file_path)
+            user_message = await models_config.transcribe_voice(file_path)
             # Удаляем временный файл
             os.remove(file_path)
         except Exception as e:
@@ -455,8 +455,8 @@ async def handle_message_or_voice(
         return  # End here for file analysis mode
 
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-    user_data, coins, giftcoins, balance, cost = (
-        await check_user_coins(user_id, current_mode, context)
+    user_data, coins, giftcoins, balance, cost = await check_user_coins(
+        user_id, current_mode, context
     )
     if user_data is None:
         return  # ❌ Прерываем выполнение, если монет не хватает
@@ -475,8 +475,7 @@ async def handle_message_or_voice(
         # Режим генерации изображений
         await update.message.reply_text("🎨 Генерирую изображение...")
         try:
-            from . import generate_image  # Import from main module
-            image_url = await generate_image(user_message)
+            image_url = await models_config.generate_image(user_message)
             await update.message.reply_photo(
                 image_url, caption=f"Сгенерировано по запросу: {user_message}"
             )
@@ -681,13 +680,3 @@ async def handle_edit_mode(
     await update.message.reply_text(
         "❌ Пожалуйста, отправьте изображение или текст."
     )
-
-
-async def transcribe_voice(file_path: str) -> str:
-    """Преобразует голосовое сообщение в текст с помощью Whisper API."""
-    with open(file_path, "rb") as audio_file:
-        transcription = models_config.client_chat.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-        )
-    return transcription.text
