@@ -190,7 +190,7 @@ async def extract_text_from_pdf_with_ocr(file_path: str) -> str:
                         temp_img_path = temp_img.name
 
                     try:
-                        # Check if Tesseract is available 
+                        # Check if Tesseract is available
                         # by running a simple test
                         import subprocess
                         try:
