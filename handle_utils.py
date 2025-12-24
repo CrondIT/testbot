@@ -707,7 +707,7 @@ async def handle_message_or_voice(
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
-    print(f"we are in handle message ot voice mode {current_mode}")
+    print(f"we are in handle message or voice mode {current_mode}")
     # Continue with standard processing using the augmented question
     # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
     user_data, coins, giftcoins, balance, cost = (

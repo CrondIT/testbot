@@ -345,14 +345,21 @@ def main():
         )
     )
     app.add_handler(
-        MessageHandler(filters.VOICE, handle_utils.handle_message_or_voice)
-    )
-    app.add_handler(
-        MessageHandler(filters.PHOTO, handle_utils.handle_message_or_voice)
+        MessageHandler(
+            filters.VOICE,
+            handle_utils.handle_message_or_voice,
+        )
     )
     app.add_handler(
         MessageHandler(
-            filters.Document.ALL, handle_utils.handle_message_or_voice
+            filters.PHOTO,
+            handle_utils.handle_message_or_voice,
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.Document.ALL,
+            handle_utils.handle_message_or_voice,
         )
     )
     # Обработчик нажатий на кнопки
@@ -368,9 +375,9 @@ def main():
         )
     )
 
-    print("✅ Мульти-режимный бот запущен!")
+    print("Multi-mode bot started!")
     print(
-        "Режимы: /ai (OpenAI), /ai_image (DALL-E),"
+        "Modes: /ai (OpenAI), /ai_image (DALL-E),"
         " /ai_edit (Gemini), /ai_file (File Analysis)"
     )
     app.run_polling(drop_pending_updates=True)
