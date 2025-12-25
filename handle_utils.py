@@ -13,14 +13,13 @@ import models_config
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
-
-
-# Global variables that need to be accessible
-user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
-user_modes = {}  # Хранит текущий режим для каждого пользователя
-user_edit_data = {}  # Хранит данные для редактирования изображений
-user_file_data = {}  # Хранит данные для анализа файлов
-MAX_CONTEXT_MESSAGES = 4
+from global_state import (
+    user_contexts,
+    user_modes,
+    user_edit_data,
+    user_file_data,
+    MAX_CONTEXT_MESSAGES,
+)
 
 
 async def download_and_convert_image(
@@ -377,17 +376,27 @@ async def handle_ai_file_mode(
         model_name = models_config.MODELS.get("ai_file")
         max_tokens = token_utils.get_token_limit(model_name)
 
-        # Rough estimation: 1 token ~ 4 characters,
-        # reserve tokens for response and context
-        # 1500 reserved for context
-        max_chars = min(len(extracted_text), (max_tokens - 1500) * 3)
+        print(f"model {model_name} max tokens {max_tokens}")
+
+        # Calculate more conservative character
+        # limit considering the full message with history
+        # Reserve more tokens for context,
+        # history, and response (2500 instead of 1500)
+        reserved_tokens_for_context = 2500
+        max_content_tokens = max_tokens - reserved_tokens_for_context
+
+        # Calculate max characters based on estimated token size
+        avg_token_size = 3  # Average size of a token in characters
+        max_chars = min(
+            len(extracted_text), max_content_tokens * avg_token_size
+        )
 
         if len(extracted_text) > max_chars:
             # Truncate the extracted text and inform the user
             truncated_extracted_text = extracted_text[:max_chars]
             await update.message.reply_text(
                 f"📝 Объем файла превышает лимит. Использую первую "
-                f"часть текста ({max_chars} сим.) для анализа."
+                f"часть текста ({max_chars} символов) для анализа."
             )
         else:
             truncated_extracted_text = extracted_text
@@ -398,13 +407,29 @@ async def handle_ai_file_mode(
             f" {truncated_extracted_text}\n\nВопрос: {user_message}"
         )
 
+        # First check if the augmented question itself is too long
+        question_tokens = token_utils.token_counter.count_openai_tokens(
+            augmented_question, model_name
+        )
+
+        if question_tokens > max_content_tokens:
+            # Truncate the question further
+            max_question_chars = max_content_tokens * avg_token_size
+            augmented_question = augmented_question[:max_question_chars]
+            await update.message.reply_text(
+                f"Вопрос дополнительно сокращен"
+                f"до {max_question_chars} символов для укладывания в лимиты."
+            )
+
+        print(f"model {model_name} max tokens {max_tokens}"
+              f"max_chars {max_chars} question_tokens {question_tokens}")
+
         # Prepare messages with truncated history
         # using the augmented question
-        model_name = models_config.MODELS.get("ai_file")
         truncated_history = token_utils.truncate_messages_for_token_limit(
             user_contexts[user_id]["ai_file"],
             model=model_name,
-            reserve_tokens=1500,
+            reserve_tokens=reserved_tokens_for_context,
         )
         messages = truncated_history + [
             {"role": "user", "content": augmented_question}
@@ -430,8 +455,33 @@ async def handle_ai_file_mode(
                     messages = token_utils.truncate_messages_for_token_limit(
                         messages,
                         model=model_name,
-                        reserve_tokens=1500,
+                        reserve_tokens=reserved_tokens_for_context,
                     )
+
+                    # Double-check token count and if still too long,
+                    #  truncate the user message specifically
+                    total_tokens = token_counter.count_openai_messages_tokens(
+                        messages, model_name
+                    )
+                    if (
+                        total_tokens > max_tokens
+                        and messages
+                        and messages[-1]["role"] == "user"
+                    ):
+                        original_content = messages[-1]["content"]
+                        remaining_tokens = max_tokens - (
+                            total_tokens
+                            - token_utils.token_counter.count_openai_tokens(
+                                original_content, model_name
+                            )
+                        )
+                        if remaining_tokens > 0:
+                            max_content_chars = (
+                                remaining_tokens * avg_token_size
+                            )
+                            messages[-1]["content"] = original_content[
+                                :max_content_chars
+                            ]
 
             response = models_config.client_chat.chat.completions.create(
                 model=model_name,  # Используем модель из константы
@@ -475,7 +525,7 @@ async def handle_ai_file_mode(
             error_msg = str(e)
             if "too long" in error_msg.lower() or "token" in error_msg.lower():
                 # LOGGING ====================
-                log_text = f"Ошибка: Сообщение слишком длинное: {str(e)}"
+                log_text = f"Ошибка (ai_file): Сообщение длинное: {str(e)}"
                 dbbot.log_action(user_id, "ai_file", log_text, 0, balance)
                 await update.message.reply_text(
                     "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
@@ -701,8 +751,17 @@ async def handle_voice_message(
 async def handle_message_or_voice(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
+    print(
+        f"handle_utils before any functions"
+        f"MAX_CONTEXT_MESSAGES :{MAX_CONTEXT_MESSAGES}"
+    )
     user_id = update.effective_user.id
+    print(
+        f"we are in handle message or voice user_id {user_id}, "
+        f"user mode {user_modes[user_id]}"
+    )
     # Если режим не установлен, устанавливаем режим чата по умолчанию
+
     if user_id not in user_modes:
         user_modes[user_id] = "chat"
 
@@ -742,14 +801,7 @@ async def handle_message_or_voice(
 
     # Обработка режима редактирования изображений
     if current_mode == "edit":
-        await handle_edit_mode(
-            update,
-            context,
-            user_id,
-            "",
-            cost,
-            balance
-        )
+        await handle_edit_mode(update, context, user_id, "", cost, balance)
         return
 
     # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===

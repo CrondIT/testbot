@@ -15,10 +15,18 @@ from telegram.ext import (
 )
 from telegram.helpers import escape_markdown
 
+from global_state import (
+    user_contexts,
+    user_modes,
+    user_edit_data,
+    user_file_data,
+)
+
 import dbbot
 import models_config
 import billing_utils
-import handle_utils
+from handle_utils import handle_message_or_voice
+
 
 # Загрузить переменные из файла .env
 load_dotenv()
@@ -28,12 +36,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 
 client_chat = models_config.client_chat
 client_image = models_config.client_image
-
-user_contexts = {}  # Хранилище контекста для каждого пользователя и режима
-user_modes = {}  # Хранит текущий режим для каждого пользователя
-user_edit_data = {}  # Хранит данные для редактирования изображений
-user_file_data = {}  # Хранит данные для анализа файлов
-MAX_CONTEXT_MESSAGES = 4
 
 # --- Файл для хранения PID для котроля что процесс уже запущен- ---
 PID_FILE = "bot.pid"
@@ -231,6 +233,11 @@ async def ai_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_modes[user_id] = "ai_file"
 
+    print(
+        f"we are in ai_file_command user_id {user_id}, "
+        f"user mode {user_modes[user_id]}"
+    )
+
     # Clear file data for this user
     if user_id in user_file_data:
         del user_file_data[user_id]
@@ -341,25 +348,25 @@ def main():
     app.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
-            handle_utils.handle_message_or_voice,
+            handle_message_or_voice,
         )
     )
     app.add_handler(
         MessageHandler(
             filters.VOICE,
-            handle_utils.handle_message_or_voice,
+            handle_message_or_voice,
         )
     )
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
-            handle_utils.handle_message_or_voice,
+            handle_message_or_voice,
         )
     )
     app.add_handler(
         MessageHandler(
             filters.Document.ALL,
-            handle_utils.handle_message_or_voice,
+            handle_message_or_voice,
         )
     )
     # Обработчик нажатий на кнопки

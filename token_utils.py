@@ -13,14 +13,16 @@ class TokenCounter:
         # Initialize encoders for OpenAI models
         self.openai_encoders = {}
 
-    def count_openai_tokens(
-        self,
-        text: str,
-        model: str
-    ) -> int:
+    def count_openai_tokens(self, text: str, model: str) -> int:
         """
         Count tokens for OpenAI models using tiktoken
         """
+        # Handle image generation models separately
+        if "dall-e" in model:
+            # For image generation models, return a simple character count
+            # or use a fixed limit for prompt length
+            return len(text)
+
         # Проверяем, содержит ли модель признаки GPT-4 или GPT-5
         if "gpt-4" in model or "gpt-5" in model:
             # Для GPT-4 и GPT-5 моделей используем cl100k_base
@@ -36,7 +38,7 @@ class TokenCounter:
                 if model not in self.openai_encoders:
                     self.openai_encoders[model] = tiktoken.encoding_for_model(
                         model
-                        )
+                    )
                 encoder = self.openai_encoders[model]
                 return len(encoder.encode(text))
             except Exception as e:
@@ -45,10 +47,19 @@ class TokenCounter:
                 return len(text) // 4
 
     def count_openai_messages_tokens(
-        self,
-        messages: List[Dict],
-        model: str
+        self, messages: List[Dict], model: str
     ) -> int:
+        # Handle image generation models separately
+        if "dall-e" in model:
+            # For image generation models,
+            # count the total characters in all text messages
+            total_chars = 0
+            for message in messages:
+                for key, value in message.items():
+                    if isinstance(value, str):
+                        total_chars += len(value)
+            return total_chars
+
         try:
             # Для новых моделей использовать "cl100k_base"
             if "gpt-4" in model or "gpt-3.5" in model or "gpt-5" in model:
@@ -75,7 +86,7 @@ class TokenCounter:
                             if "text" in item:
                                 total_tokens += len(
                                     encoding.encode(item["text"])
-                                    )
+                                )
                             # изображения: не кодируются напрямую
                 if key == "name":
                     total_tokens += tokens_per_name
@@ -138,6 +149,37 @@ def truncate_messages_for_token_limit(
     """
     if max_tokens is None:
         max_tokens = get_token_limit(model)
+
+    # For image generation models,
+    # use character-based limits instead of token limits
+    if "dall-e" in model:
+        # For image generation, we just need to limit the prompt length
+        # Usually image models have character limits for prompts
+        if not messages:
+            return []
+
+        # Combine all text content to check against character limit
+        total_text = ""
+        for msg in messages:
+            for key, value in msg.items():
+                if isinstance(value, str):
+                    total_text += (
+                        value + " "
+                    )  # Add space between different message parts
+
+        # If total text is within reasonable limits, return all messages
+        # (image models usually have prompt
+        # length limits around 1000-4000 chars)
+        if len(total_text) <= max_tokens - reserve_tokens:
+            return messages
+        else:
+            # For image models, we typically only
+            # care about the last user message
+            # as the prompt for image generation
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    return [msg]  # Return just the user prompt
+            return messages  # If no user message found, return all
 
     # Reserve some tokens for response
     available_tokens = max_tokens - reserve_tokens
@@ -212,6 +254,25 @@ def check_token_usage(
     """
     if max_tokens is None:
         max_tokens = get_token_limit(model)
+
+    # For image generation models, use character-based counting
+    if "dall-e" in model:
+        # Count total characters in all messages
+        total_chars = 0
+        for msg in messages:
+            for key, value in msg.items():
+                if isinstance(value, str):
+                    total_chars += len(value)
+
+        available_chars = max_tokens - reserve_tokens
+        return {
+            "total_tokens": total_chars,  # Characters for image models
+            "max_tokens": max_tokens,
+            "available_tokens": available_chars,  # Available characters
+            "reserve_tokens": reserve_tokens,
+            "is_within_limit": total_chars <= available_chars,
+            "excess_tokens": max(0, total_chars - available_chars),
+        }
 
     available_tokens = max_tokens - reserve_tokens
     total_tokens = token_counter.count_openai_messages_tokens(messages, model)
