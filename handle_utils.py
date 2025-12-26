@@ -264,6 +264,7 @@ async def handle_ai_file_mode(
 
     # Check if the message contains a document
     if update.message.document:
+        print("1. Check if the message contains a document")
         # Get the file
         file = await context.bot.get_file(update.message.document.file_id)
 
@@ -287,6 +288,7 @@ async def handle_ai_file_mode(
 
         try:
             # Extract text from file
+            print("2. Extract text from file")
             await update.message.reply_text("📄 Извлекаю текст из файла...")
 
             extracted_text = await file_utils.process_uploaded_file(
@@ -390,7 +392,7 @@ async def handle_ai_file_mode(
         max_chars = min(
             len(extracted_text), max_content_tokens * avg_token_size
         )
-
+        print(f"max_chars {max_chars}")
         if len(extracted_text) > max_chars:
             # Truncate the extracted text and inform the user
             truncated_extracted_text = extracted_text[:max_chars]
@@ -411,7 +413,7 @@ async def handle_ai_file_mode(
         question_tokens = token_utils.token_counter.count_openai_tokens(
             augmented_question, model_name
         )
-
+        print(f"question_tokens {question_tokens}")
         if question_tokens > max_content_tokens:
             # Truncate the question further
             max_question_chars = max_content_tokens * avg_token_size
@@ -441,16 +443,19 @@ async def handle_ai_file_mode(
 
         try:
             # Используем клиент чата
+            print("3. Используем клиент чата")
             # Проверяем, что последнее сообщение - это от пользователя
             if messages and messages[-1]["role"] == "user":
                 # Проверяем токены перед отправкой
+                print("4. Проверяем токены перед отправкой")
                 token_counter = token_utils.token_counter
                 total_tokens = token_counter.count_openai_messages_tokens(
                     messages, model_name
                 )
                 max_tokens = token_utils.get_token_limit(model_name)
-
+                print(f"4 before send total {total_tokens} max {max_tokens}")
                 if total_tokens > max_tokens:
+                    print("5 Обрезаем сообщения до ... [truncated]")
                     # Обрезаем сообщения до ... [truncated]
                     messages = token_utils.truncate_messages_for_token_limit(
                         messages,
@@ -463,6 +468,9 @@ async def handle_ai_file_mode(
                     total_tokens = token_counter.count_openai_messages_tokens(
                         messages, model_name
                     )
+                    print(f"Double-check tokens before send {total_tokens}"
+                          f"max tokens {max_tokens}"
+                          f"message {messages}")
                     if (
                         total_tokens > max_tokens
                         and messages
@@ -482,12 +490,12 @@ async def handle_ai_file_mode(
                             messages[-1]["content"] = original_content[
                                 :max_content_chars
                             ]
-
-            response = models_config.client_chat.chat.completions.create(
-                model=model_name,  # Используем модель из константы
-                messages=messages,
+            print(f"6. model {model_name} {user_message}")
+            reply = models_config.ask_gpt51_with_web_search(
+                user_message, enable_web_search=False
             )
-            reply = response.choices[0].message.content
+
+            # reply = response.choices[0].message.content
 
             # Обновляем контекст: добавляем и запрос, и ответ
             user_contexts[user_id]["ai_file"].append(
@@ -528,7 +536,7 @@ async def handle_ai_file_mode(
                 log_text = f"Ошибка (ai_file): Сообщение длинное: {str(e)}"
                 dbbot.log_action(user_id, "ai_file", log_text, 0, balance)
                 await update.message.reply_text(
-                    "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
+                    "⚠️ Длинное сообщение (ai_file).Cократите пожалуйста."
                 )
             else:
                 # LOGGING ====================
