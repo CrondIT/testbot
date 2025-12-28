@@ -75,28 +75,7 @@ def initialize_user_context(user_id: int, current_mode: str):
 
     if current_mode not in user_contexts[user_id]:
         # Определяем системные сообщения для разных режимов
-        if current_mode == "ai_file":
-            system_message = (
-                "Ты помощник по анализу документов."
-                "Отвечай на вопросы касательно "
-                "содержимого предоставленного файла."
-            )
-        elif current_mode == "chat":
-            # Для режима чата в file_analysis используется другое сообщение
-            system_message = (
-                "You are a helpful assistant. "
-                "Use web search only when your knowledge may be outdated "
-                "or when the user explicitly asks for fresh data."
-            )
-        elif current_mode == "image":
-            system_message = "Ты помогаешь генерировать изображения."
-        elif current_mode == "edit":
-            system_message = (
-                "Ты помогаешь редактировать изображения с помощью Gemini."
-            )
-        else:
-            system_message = "Ты помощник."
-
+        system_message = models_config.SYSTEM_PROMPTS.get(current_mode)
         # Инициализируем контекст с системным сообщением
         user_contexts[user_id][current_mode] = [
             {"role": "system", "content": system_message}
@@ -492,7 +471,9 @@ async def handle_ai_file_mode(
                             ]
             print(f"6. model {model_name} {user_message}")
             reply = models_config.ask_gpt51_with_web_search(
-                user_message, enable_web_search=False
+                messages,
+                models_config.SYSTEM_PROMPTS.get(model_name),
+                enable_web_search=False,
             )
 
             # reply = response.choices[0].message.content
@@ -593,12 +574,14 @@ async def handle_chat_mode(
     balance: float,
 ):
     """Handle the chat mode functionality separately"""
+
+    system_message = models_config.SYSTEM_PROMPTS.get("chat")
     from billing_utils import spend_coins
 
     try:
         # Используем функцию с веб-поиском для режима chat
         reply = models_config.ask_gpt51_with_web_search(
-            user_message, enable_web_search=True
+            user_message, system_message, enable_web_search=True
         )
 
         # Обновляем контекст: добавляем и запрос, и ответ
@@ -759,32 +742,21 @@ async def handle_voice_message(
 async def handle_message_or_voice(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    print(
-        f"handle_utils before any functions"
-        f"MAX_CONTEXT_MESSAGES :{MAX_CONTEXT_MESSAGES}"
-    )
-    user_id = update.effective_user.id
-    print(
-        f"we are in handle message or voice user_id {user_id}, "
-        f"user mode {user_modes[user_id]}"
-    )
-    # Если режим не установлен, устанавливаем режим чата по умолчанию
 
+    user_id = update.effective_user.id
+    # Если режим не установлен, устанавливаем режим чата по умолчанию
     if user_id not in user_modes:
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
     print(f"we are in handle message or voice mode {current_mode}")
-    # Continue with standard processing using the augmented question
-    # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
+    # --- start coins check ---
     user_data, coins, giftcoins, balance, cost = (
         await billing_utils.check_user_coins(user_id, current_mode, context)
     )
     if user_data is None:
-        return  # ❌ Прерываем выполнение, если монет не хватает
-    # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
-
-    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА
+        return  # Прерываем выполнение, если монет не хватает
+    # --- end coins check ---
     initialize_user_context(user_id, current_mode)
 
     # Handle file uploads in file_analysis mode
@@ -799,13 +771,13 @@ async def handle_message_or_voice(
         )
         return  # End here for file analysis mode
 
-    # --- ✅ ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
+    # --- ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
     user_data, coins, giftcoins, balance, cost = (
         await billing_utils.check_user_coins(user_id, current_mode, context)
     )
     if user_data is None:
-        return  # ❌ Прерываем выполнение, если монет не хватает
-    # --- ✅ ПРОВЕРКА ЗАВЕРШЕНА ---
+        return  # Прерываем выполнение, если монет не хватает
+    # --- ПРОВЕРКА ЗАВЕРШЕНА ---
 
     # Обработка режима редактирования изображений
     if current_mode == "edit":

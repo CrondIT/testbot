@@ -1,7 +1,7 @@
 import tiktoken
 
 # import google.generativeai as genai
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 
 class TokenCounter:
@@ -13,10 +13,21 @@ class TokenCounter:
         # Initialize encoders for OpenAI models
         self.openai_encoders = {}
 
-    def count_openai_tokens(self, text: str, model: str) -> int:
+    def count_openai_tokens(
+        self, text: Union[str, None, Any], model: str
+    ) -> int:
         """
         Count tokens for OpenAI models using tiktoken
+        Accepts string, None, or other types
+        and converts them to string for processing
         """
+        # Convert text to string if it's not already,
+        # handling None and other types
+        if text is None:
+            text = ""
+        elif not isinstance(text, str):
+            text = str(text)
+
         # Handle image generation models separately
         if "dall-e" in model:
             # For image generation models, return a simple character count
@@ -78,14 +89,22 @@ class TokenCounter:
             total_tokens += tokens_per_message
             for key, value in message.items():
                 if isinstance(value, str):
-                    total_tokens += len(encoding.encode(value))
+                    # Convert to string to ensure it's properly handled
+                    str_value = str(value) if value is not None else ""
+                    total_tokens += len(encoding.encode(str_value))
                 elif isinstance(value, list):
                     # Если content — список (например, текст + изображение)
                     for item in value:
                         if isinstance(item, dict):
                             if "text" in item:
+                                # Ensure the text is a string
+                                text_value = (
+                                    str(item["text"])
+                                    if item["text"] is not None
+                                    else ""
+                                )
                                 total_tokens += len(
-                                    encoding.encode(item["text"])
+                                    encoding.encode(text_value)
                                 )
                             # изображения: не кодируются напрямую
                 if key == "name":

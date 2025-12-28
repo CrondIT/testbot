@@ -44,16 +44,16 @@ async def check_user_coins(user_id: int, current_mode: str, context) -> tuple:
     """
     # Определяем стоимость в зависимости от режима
     cost = models_config.COST_PER_MESSAGE.get(current_mode)
-    # Если стоимость не определена для режима, 
-    # устанавливаем значение по умолчанию
+    # Если стоимость не определена для режима
+    # возвращаеи None и 0 монет
     if cost is None:
         print(f"стоимость не определена {current_mode}")
         return None, 0, 0, 0, 0
     # Получаем данные пользователя
+    # (данные о балансе пользователя)
     user_data = dbbot.get_user(user_id)
     if not user_data:
         return None, 0, 0, 0, 0
-
     # Считаем общее количество монет
     coins = user_data["coins"]
     giftcoins = user_data["giftcoins"]
@@ -78,7 +78,6 @@ async def check_user_coins(user_id: int, current_mode: str, context) -> tuple:
         )
         # ❌ Прерываем выполнение, если монет не хватает
         return None, 0, 0, 0, 0
-
     return user_data, coins, giftcoins, balance, cost
 
 

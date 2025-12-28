@@ -29,6 +29,24 @@ MODELS = {
     "ai_file": "gpt-5.1",
 }
 
+SYSTEM_PROMPTS = {
+    "chat": (
+        "You are a helpful assistant. "
+        "Use web search only when your knowledge may be outdated "
+        "or when the user explicitly asks for fresh data."
+    ),
+    "image": (
+        "Ты помогаешь генерировать изображения."
+    ),
+    "edit": (
+        "Ты помогаешь редактировать изображения с помощью Gemini."
+    ),
+    "ai_file": (
+        "Ты помощник по анализу документов."
+        "Отвечай на вопросы касательно "
+        "содержимого предоставленного файла."
+    ),
+}
 # Cost per message
 COST_PER_MESSAGE = {
     "chat": 2,
@@ -82,7 +100,9 @@ async def get_openai_models_info() -> str:
 
 
 def ask_gpt51_with_web_search(
-    query: str, enable_web_search: bool = True
+    query: str,
+    system_message: str,
+    enable_web_search: bool = True,
 ) -> str:
     """
     Задать вопрос GPT-5.1 с опциональным поиском в интернете.
@@ -126,11 +146,7 @@ def ask_gpt51_with_web_search(
         tools=tools,
         tool_choice=tool_choice,
         input=query,
-        instructions=(
-            "You are a helpful assistant. "
-            "Use web search only when your knowledge may be outdated "
-            "or when the user explicitly asks for fresh data."
-        ),
+        instructions=system_message,
         temperature=0.4,
         # include sources only if web search is enabled
         include=(
