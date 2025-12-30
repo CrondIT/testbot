@@ -148,13 +148,16 @@ def ask_gpt51_with_web_search(
         input=query,
         instructions=system_message,
         temperature=0.4,
+        n=1,
+        stop=None,
+        timeout=15,
         # include sources only if web search is enabled
         include=(
             ["web_search_call.action.sources"] if enable_web_search else []
         ),
     )
 
-    return response.output_text
+    return response.choices[0].text.strip()
 
 
 async def generate_image(prompt: str) -> str:
@@ -174,7 +177,7 @@ async def generate_image(prompt: str) -> str:
 
     try:
         response = client_image.images.generate(
-            model=model_name,  # Используем константу
+            model=model_name,
             prompt=prompt,
             size="1024x1024",
             quality="standard",
