@@ -351,10 +351,8 @@ async def handle_ai_file_mode(
         # Process the question about the file content
         user_message = update.message.text.strip()
         extracted_text = user_file_data[user_id]["extracted_text"]
-
-        # Limit the extracted text length to prevent connection errors
-        # Calculate max characters based on model's token limit
         model_name = models_config.MODELS.get("ai_file")
+
         max_tokens = token_utils.get_token_limit(model_name)
 
         print(f"model {model_name} max tokens {max_tokens}")
@@ -402,8 +400,10 @@ async def handle_ai_file_mode(
                 f"до {max_question_chars} символов для укладывания в лимиты."
             )
 
-        print(f"model {model_name} max tokens {max_tokens}"
-              f"max_chars {max_chars} question_tokens {question_tokens}")
+        print(
+            f"model {model_name} max tokens {max_tokens}"
+            f"max_chars {max_chars} question_tokens {question_tokens}"
+        )
 
         # Prepare messages with truncated history
         # using the augmented question
@@ -447,9 +447,11 @@ async def handle_ai_file_mode(
                     total_tokens = token_counter.count_openai_messages_tokens(
                         messages, model_name
                     )
-                    print(f"Double-check tokens before send {total_tokens}"
-                          f"max tokens {max_tokens}"
-                          f"message {messages}")
+                    print(
+                        f"Double-check tokens before send {total_tokens}"
+                        f"max tokens {max_tokens}"
+                        f"message {messages}"
+                    )
                     if (
                         total_tokens > max_tokens
                         and messages
@@ -470,9 +472,16 @@ async def handle_ai_file_mode(
                                 :max_content_chars
                             ]
             print(f"6. model {model_name} {user_message}")
+            # Prepare the full context including system message,
+            # history and current query
+            system_message = models_config.SYSTEM_PROMPTS.get("ai_file")
+            full_context = (
+                [{"role": "system", "content": system_message}]
+                + truncated_history
+                + [{"role": "user", "content": augmented_question}]
+            )
             reply = models_config.ask_gpt51_with_web_search(
-                messages,
-                models_config.SYSTEM_PROMPTS.get(model_name),
+                context_history=full_context,
                 enable_web_search=False,
             )
 
@@ -490,8 +499,8 @@ async def handle_ai_file_mode(
             # Экранируем специальные символы Markdown,
             # чтобы избежать ошибок
             safe_reply = escape_markdown(reply, version=2)
-            await update.message.reply_text(
-                safe_reply, parse_mode="MarkdownV2"
+            await send_long_message(
+                update, safe_reply, parse_mode="MarkdownV2"
             )
 
             # Списываем монеты и записываем лог
@@ -563,6 +572,70 @@ async def handle_image_mode(
         await update.message.reply_text(f"⚠️ {str(e)}")
 
 
+async def send_long_message(update: Update, text: str, parse_mode: str = None):
+    """
+    Отправляет длинное сообщение, разбивая его на части,
+    если оно превышает лимит Telegram (4096 символов)
+    """
+    # Telegram's message limit is 4096 characters
+    TELEGRAM_MESSAGE_LIMIT = 4096
+
+    if len(text) <= TELEGRAM_MESSAGE_LIMIT:
+        # Message fits in a single message
+        await update.message.reply_text(text, parse_mode=parse_mode)
+        return
+
+    # Split the message by paragraphs first to avoid breaking sentences
+    paragraphs = text.split("\n")
+
+    current_message = ""
+    for paragraph in paragraphs:
+        # Check if adding this paragraph would exceed the limit
+        if len(current_message) + len(paragraph) + 1 <= TELEGRAM_MESSAGE_LIMIT:
+            if current_message:
+                current_message += "\n" + paragraph
+            else:
+                current_message = paragraph
+        else:
+            # Send the current message if it's not empty
+            if current_message:
+                await update.message.reply_text(
+                    current_message, parse_mode=parse_mode
+                )
+
+            # If the single paragraph is too long, split it by sentences
+            if len(paragraph) > TELEGRAM_MESSAGE_LIMIT:
+                sentences = paragraph.split(". ")
+                temp_message = ""
+                for sentence in sentences:
+                    if (
+                        len(temp_message) + len(sentence) + 2
+                        <= TELEGRAM_MESSAGE_LIMIT
+                    ):
+                        if temp_message:
+                            temp_message += ". " + sentence
+                        else:
+                            temp_message = sentence
+                    else:
+                        if temp_message:
+                            await update.message.reply_text(
+                                temp_message + ".", parse_mode=parse_mode
+                            )
+                        temp_message = sentence
+
+                # Add the last part if there's anything left
+                if temp_message:
+                    current_message = temp_message
+                else:
+                    current_message = ""
+            else:
+                current_message = paragraph
+
+    # Send the remaining message if there's anything left
+    if current_message:
+        await update.message.reply_text(current_message, parse_mode=parse_mode)
+
+
 async def handle_chat_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -574,14 +647,35 @@ async def handle_chat_mode(
     balance: float,
 ):
     """Handle the chat mode functionality separately"""
-
-    system_message = models_config.SYSTEM_PROMPTS.get("chat")
+    print(f"we are in handle_chat_mode, user_message-{user_message}")
     from billing_utils import spend_coins
 
     try:
         # Используем функцию с веб-поиском для режима chat
+        # Include chat history for context with proper token limit
+        model_name = models_config.MODELS.get("chat")
+        user_context = []
+        if user_id in user_contexts and "chat" in user_contexts[user_id]:
+            # Create a temporary history that includes the current user message
+            temp_history = user_contexts[user_id]["chat"] + [
+                {"role": "user", "content": user_message}
+            ]
+
+            # Truncate history based on token limits,
+            # including the current message
+            user_context = token_utils.truncate_messages_for_token_limit(
+                messages=temp_history,
+                model=model_name,
+                reserve_tokens=1500,
+            )
+
+        # Additionally limit the number of messages in history
+        if len(user_context) > MAX_CONTEXT_MESSAGES:
+            user_context = user_context[-MAX_CONTEXT_MESSAGES:]
+
         reply = models_config.ask_gpt51_with_web_search(
-            user_message, system_message, enable_web_search=True
+            enable_web_search=True,
+            context_history=user_context,
         )
 
         # Обновляем контекст: добавляем и запрос, и ответ
@@ -595,7 +689,10 @@ async def handle_chat_mode(
         # Отправляем ответ
         # Экранируем специальные символы Markdown, чтобы избежать ошибок
         safe_reply = escape_markdown(reply, version=2)
-        await update.message.reply_text(safe_reply, parse_mode="MarkdownV2")
+
+        # Send the message, splitting if necessary
+        # to respect Telegram's character limit
+        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
 
         # Списываем монеты и записываем лог
         spend_coins(
@@ -610,102 +707,9 @@ async def handle_chat_mode(
     except Exception as e:
         # LOGGING ====================
         log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
+        print(log_text)
         dbbot.log_action(user_id, "chat", log_text, 0, balance)
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
-
-
-async def handle_general_mode(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    user_message: str,
-    current_mode: str,
-    cost: int,
-    coins: int,
-    giftcoins: int,
-    balance: float,
-):
-    """Handle the general mode functionality for other modes"""
-    from billing_utils import spend_coins
-
-    # Проверяем и ограничиваем количество токенов
-    model_name = models_config.MODELS.get(current_mode)
-    truncated_history = token_utils.truncate_messages_for_token_limit(
-        user_contexts[user_id][current_mode],
-        model=model_name,
-        reserve_tokens=1500,
-    )
-    messages = truncated_history + [{"role": "user", "content": user_message}]
-
-    # Дополнительно ограничиваем длину истории
-    if len(messages) > MAX_CONTEXT_MESSAGES:
-        messages = messages[-MAX_CONTEXT_MESSAGES:]
-
-    try:
-        # Используем клиент чата
-        # Проверяем, что последнее сообщение - это от пользователя
-        if messages and messages[-1]["role"] == "user":
-            # Проверяем токены перед отправкой
-            token_counter = token_utils.token_counter
-            total_tokens = token_counter.count_openai_messages_tokens(
-                messages, model_name
-            )
-            max_tokens = token_utils.get_token_limit(model_name)
-
-            if total_tokens > max_tokens:
-                # Обрезаем сообщения до приемлемого размера
-                messages = token_utils.truncate_messages_for_token_limit(
-                    messages,
-                    model=model_name,
-                    reserve_tokens=1500,  # Оставляем место для ответа
-                )
-
-        response = models_config.client_chat.chat.completions.create(
-            model=model_name,  # Используем модель из константы
-            messages=messages,
-        )
-        reply = response.choices[0].message.content
-
-        # Обновляем контекст: добавляем и запрос, и ответ
-        user_contexts[user_id][current_mode].append(
-            {"role": "user", "content": user_message}
-        )
-        user_contexts[user_id][current_mode].append(
-            {"role": "assistant", "content": reply}
-        )
-
-        # Отправляем ответ
-        # Экранируем специальные символы Markdown, чтобы избежать ошибок
-        safe_reply = escape_markdown(reply, version=2)
-        await update.message.reply_text(safe_reply, parse_mode="MarkdownV2")
-
-        # Списываем монеты и записываем лог
-        spend_coins(
-            user_id,
-            cost,
-            coins,
-            giftcoins,
-            current_mode,
-            user_message,
-            safe_reply,
-        )
-    except Exception as e:
-        # Обработка ошибки "Message is too long" и других
-        error_msg = str(e)
-        if "too long" in error_msg.lower() or "token" in error_msg.lower():
-            # LOGGING ====================
-            log_text = f"Ошибка: Сообщение слишком длинное: {str(e)}"
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-            await update.message.reply_text(
-                "⚠️ Сообщение слишком длинное. Пожалуйста, сократите."
-            )
-        else:
-            # LOGGING ====================
-            log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-            await update.message.reply_text(
-                "⚠️ Ошибка при обращении к ChatGPT."
-            )
 
 
 async def handle_voice_message(
@@ -749,7 +753,8 @@ async def handle_message_or_voice(
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
-    print(f"we are in handle message or voice mode {current_mode}")
+    print(f"we are in handle message or voice, mode {current_mode}")
+
     # --- start coins check ---
     user_data, coins, giftcoins, balance, cost = (
         await billing_utils.check_user_coins(user_id, current_mode, context)
@@ -757,6 +762,8 @@ async def handle_message_or_voice(
     if user_data is None:
         return  # Прерываем выполнение, если монет не хватает
     # --- end coins check ---
+
+    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
     initialize_user_context(user_id, current_mode)
 
     # Handle file uploads in file_analysis mode
@@ -817,6 +824,7 @@ async def handle_message_or_voice(
 
     # Для режима chat используем специальную функцию с возможностью веб-поиска
     if current_mode == "chat":
+        print(f"we are in handle message or voice in mode {current_mode}")
         await handle_chat_mode(
             update,
             context,
@@ -828,16 +836,3 @@ async def handle_message_or_voice(
             balance,
         )
         return
-    else:
-        # Для других режимов используем общую логику
-        await handle_general_mode(
-            update,
-            context,
-            user_id,
-            user_message,
-            current_mode,
-            cost,
-            coins,
-            giftcoins,
-            balance,
-        )

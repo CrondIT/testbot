@@ -28,34 +28,27 @@ class TokenCounter:
         elif not isinstance(text, str):
             text = str(text)
 
-        # Handle image generation models separately
         if "dall-e" in model:
             # For image generation models, return a simple character count
             # or use a fixed limit for prompt length
             return len(text)
 
-        # Проверяем, содержит ли модель признаки GPT-4 или GPT-5
-        if "gpt-4" in model or "gpt-5" in model:
-            # Для GPT-4 и GPT-5 моделей используем cl100k_base
+        if model not in self.openai_encoders:
             try:
-                encoder = tiktoken.get_encoding("cl100k_base")
-                return len(encoder.encode(text))
-            except Exception as e:
-                # Fallback: rough estimation (1 token ~ 4 characters)
-                print(f"Ошибка count_openai_tokens: {e}")
-                return len(text) // 4
-        else:
-            try:
-                if model not in self.openai_encoders:
-                    self.openai_encoders[model] = tiktoken.encoding_for_model(
-                        model
-                    )
-                encoder = self.openai_encoders[model]
-                return len(encoder.encode(text))
-            except Exception as e:
-                # Fallback: rough estimation (1 token ~ 4 characters)
-                print(f"Ошибка count_openai_tokens: {e}")
-                return len(text) // 4
+                self.openai_encoders[model] = tiktoken.encoding_for_model(
+                    model
+                )
+            except KeyError:
+                # Для неизвестных моделей используем
+                # cl100k_base как универсальный энкодер
+                self.openai_encoders[model] = tiktoken.get_encoding(
+                    "cl100k_base"
+                )
+                # Или можно закэшировать под другим ключом,
+                # если важно различать
+
+        encoder = self.openai_encoders[model]
+        return len(encoder.encode(text))
 
     def count_openai_messages_tokens(
         self, messages: List[Dict], model: str
@@ -69,17 +62,27 @@ class TokenCounter:
                 for key, value in message.items():
                     if isinstance(value, str):
                         total_chars += len(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict) and "text" in item:
+                                total_chars += len(item["text"])
             return total_chars
 
-        try:
-            # Для новых моделей использовать "cl100k_base"
-            if "gpt-4" in model or "gpt-3.5" in model or "gpt-5" in model:
-                encoding = tiktoken.get_encoding("cl100k_base")
-            else:
-                encoding = tiktoken.encoding_for_model(model)
-        except Exception as e:
-            print(f"Ошибка count_openai_messages_tokens: {e}")
-            encoding = tiktoken.get_encoding("cl100k_base")
+        if model not in self.openai_encoders:
+            try:
+                self.openai_encoders[model] = tiktoken.encoding_for_model(
+                    model
+                )
+            except KeyError:
+                # Для неизвестных моделей используем
+                # cl100k_base как универсальный энкодер
+                self.openai_encoders[model] = tiktoken.get_encoding(
+                    "cl100k_base"
+                )
+                # Или можно закэшировать под другим ключом,
+                # если важно различать
+
+        encoder = self.openai_encoders[model]
 
         tokens_per_message = 3  # <|start|>{role}|<|message|>{content}|<|end|>
         tokens_per_name = 1
@@ -91,7 +94,7 @@ class TokenCounter:
                 if isinstance(value, str):
                     # Convert to string to ensure it's properly handled
                     str_value = str(value) if value is not None else ""
-                    total_tokens += len(encoding.encode(str_value))
+                    total_tokens += len(encoder.encode(str_value))
                 elif isinstance(value, list):
                     # Если content — список (например, текст + изображение)
                     for item in value:
@@ -104,7 +107,7 @@ class TokenCounter:
                                     else ""
                                 )
                                 total_tokens += len(
-                                    encoding.encode(text_value)
+                                    encoder.encode(text_value)
                                 )
                             # изображения: не кодируются напрямую
                 if key == "name":
@@ -138,6 +141,7 @@ def get_token_limit(model_name: str) -> int:
     """
     limits = {
         # OpenAI models
+        "gpt-5.2": 128000,
         "gpt-5.1": 128000,
         "gpt-4o-mini": 128000,
         "gpt-4-turbo": 128000,
@@ -160,23 +164,25 @@ def get_token_limit(model_name: str) -> int:
 def truncate_messages_for_token_limit(
     messages: List[Dict[str, str]],
     model: str,
-    max_tokens: int = None,
     reserve_tokens: int = 1000,
 ) -> List[Dict[str, str]]:
     """
     Truncate messages to fit within token limit
     """
-    if max_tokens is None:
-        max_tokens = get_token_limit(model)
+    if not messages:
+        return []
+
+    max_tokens = get_token_limit(model)
+    # Reserve some tokens for response
+    available_tokens = max_tokens - reserve_tokens
+    if available_tokens <= 0:
+        return []
 
     # For image generation models,
     # use character-based limits instead of token limits
     if "dall-e" in model:
         # For image generation, we just need to limit the prompt length
         # Usually image models have character limits for prompts
-        if not messages:
-            return []
-
         # Combine all text content to check against character limit
         total_text = ""
         for msg in messages:
@@ -200,32 +206,21 @@ def truncate_messages_for_token_limit(
                     return [msg]  # Return just the user prompt
             return messages  # If no user message found, return all
 
-    # Reserve some tokens for response
-    available_tokens = max_tokens - reserve_tokens
-
-    if available_tokens <= 0:
-        return []
-
     # First check if the full message list fits
     total_tokens = token_counter.count_openai_messages_tokens(messages, model)
-
     if total_tokens <= available_tokens:
         return messages
 
     # If not, we need to truncate
     # Keep the system message if present,
     # and remove oldest user/assistant pairs
-    if not messages:
-        return []
-
     # Separate system message from conversation
     system_message = None
     conversation_messages = []
 
     for msg in messages:
-        if msg.get("role") == "system":
-            if system_message is None:
-                system_message = msg
+        if msg.get("role") == "system" and system_message is None:
+            system_message = msg
         else:
             conversation_messages.append(msg)
 
@@ -237,6 +232,8 @@ def truncate_messages_for_token_limit(
         )
 
     available_for_conversation = available_tokens - system_tokens
+    if available_for_conversation <= 0:
+        return []
 
     # Start from the end and keep the most recent messages
     truncated_conversation = []

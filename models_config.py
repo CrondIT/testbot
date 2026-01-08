@@ -23,10 +23,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 # Модели для разных режимов
 MODELS = {
-    "chat": "gpt-5.1",
+    "chat": "gpt-5.2",
     "image": "dall-e-3",
     "edit": "gemini-2.5-flash-preview-image",
-    "ai_file": "gpt-5.1",
+    "ai_file": "gpt-5.2",
 }
 
 SYSTEM_PROMPTS = {
@@ -50,9 +50,9 @@ SYSTEM_PROMPTS = {
 # Cost per message
 COST_PER_MESSAGE = {
     "chat": 2,
+    "ai_file": 3,
     "image": 5,
     "edit": 6,
-    "ai_file": 3,
 }
 
 
@@ -100,64 +100,48 @@ async def get_openai_models_info() -> str:
 
 
 def ask_gpt51_with_web_search(
-    query: str,
-    system_message: str,
+    context_history: list,
     enable_web_search: bool = True,
 ) -> str:
     """
-    Задать вопрос GPT-5.1 с опциональным поиском в интернете.
+    Задать вопрос GPT-5.2 с опциональным интернет-поиском.
 
-    :param query: Текст вопроса.
-    :param enable_web_search:
-        Если True — модель может использовать интернет-поиск.
-        Если False — только внутренние знания, без поиска.
-    :return: Текст ответа от модели.
-    """
-    # Проверяем длину запроса и ограничиваем его при необходимости
-    model_name = "gpt-5.1"
-    max_tokens = token_utils.get_token_limit(model_name)
-    query_tokens = token_utils.token_counter.count_openai_tokens(
-        query, model_name
-    )
-
-    if query_tokens > max_tokens:
-        # Обрезаем запрос до допустимого размера
-        avg_token_size = 4  # средний размер токена в символах
-        max_chars = max_tokens * avg_token_size
-        query = query[:max_chars]
-
-    # Подготовка инструментов: только если разрешён поиск
-    tools = (
+    :param context_history: История сообщений в формате:
         [
+            {"role": "system", "content": "Ты полезный ассистент"},
+            {"role": "user", "content": "Вопрос"}
+        ]
+    :param enable_web_search: Разрешить ли web search
+    :return: Текст ответа модели
+    """
+
+    if not context_history:
+        raise ValueError("context_history не должен быть пустым")
+
+    # Инструменты подключаем только если разрешён поиск
+    tools = []
+    if enable_web_search:
+        tools.append(
             {
                 "type": "web_search",
-                # Можно расширить: фильтры, язык, регион и т.п.
             }
-        ]
-        if enable_web_search
-        else []
-    )
+        )
 
-    # Выбор поведения: использовать ли инструменты
-    tool_choice = "auto" if enable_web_search else "none"
+    try:
+        response = client_chat.responses.create(
+            model="gpt-5.2",
+            input=context_history,
+            tools=tools,
+            temperature=0.4,
+            timeout=30,
+        )
 
-    response = client_chat.responses.create(
-        model="gpt-5.1",  # или "gpt-5.1-thinking"
-        tools=tools,
-        tool_choice=tool_choice,
-        input=query,
-        instructions=system_message,
-        temperature=0.4,
-        n=1,
-        stop=None,
-        timeout=15,
-        # include sources only if web search is enabled
-        include=(
-            ["web_search_call.action.sources"] if enable_web_search else []
-        ),
-    )
+        # Самый простой и безопасный способ получить текст
+        return response.output_text.strip()
 
-    return response.choices[0].text.strip()
+    except Exception as e:
+        print("Ошибка при запросе к GPT:", e)
+        raise
 
 
 async def generate_image(prompt: str) -> str:
