@@ -133,7 +133,7 @@ def ask_gpt51_with_web_search(
             input=context_history,
             tools=tools,
             temperature=0.4,
-            timeout=30,
+            timeout=60,
         )
 
         # Самый простой и безопасный способ получить текст

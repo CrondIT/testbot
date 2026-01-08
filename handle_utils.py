@@ -168,8 +168,9 @@ async def handle_edit_mode(
             )
         return
     # Если пользователь отправил текст
-    elif update.message.text:
-        user_message = update.message.text.strip()
+    # или голосовое сообщение (уже преобразованное)
+    elif user_message:
+        # user_message is already processed (either from text or voice)
         if edit_data.get("step") == "waiting_prompt":
             await update.message.reply_text("🔄 Редактирую изображение...")
             try:
@@ -344,12 +345,13 @@ async def handle_ai_file_mode(
             )
             return
     elif (
-        update.message.text
+        # This will be true for both text messages and voice-converted messages
+        user_message
         and user_id in user_file_data
         and "extracted_text" in user_file_data[user_id]
     ):
         # Process the question about the file content
-        user_message = update.message.text.strip()
+        # user_message is already processed (either from text or voice)
         extracted_text = user_file_data[user_id]["extracted_text"]
         model_name = models_config.MODELS.get("ai_file")
 
@@ -392,13 +394,59 @@ async def handle_ai_file_mode(
         )
         print(f"question_tokens {question_tokens}")
         if question_tokens > max_content_tokens:
-            # Truncate the question further
-            max_question_chars = max_content_tokens * avg_token_size
-            augmented_question = augmented_question[:max_question_chars]
-            await update.message.reply_text(
-                f"Вопрос дополнительно сокращен"
-                f"до {max_question_chars} символов для укладывания в лимиты."
+            # The combined content (file + question) exceeds token limits
+            # Try to preserve as much of the file content
+            # as possible and truncate the user's question
+
+            # Calculate tokens used by file content and header
+            content_and_header_text = (
+                f"Файл содержит следующий текст: "
+                f"{truncated_extracted_text}\n\nВопрос: "
+                )
+            content_and_header_tokens = (
+                token_utils.token_counter.count_openai_tokens(
+                    content_and_header_text, model_name
+                )
             )
+
+            # Available tokens for the user's question
+            # (with buffer for response)
+            available_for_question = (
+                max_tokens - content_and_header_tokens - 500
+            )  # buffer for response
+
+            if available_for_question > 0:
+                # Calculate max characters for the user's question
+                max_question_chars = int(
+                    available_for_question * avg_token_size
+                )
+                if len(user_message) > max_question_chars:
+                    # Truncate the user's question to fit with the file content
+                    truncated_user_message = user_message[:max_question_chars]
+                    augmented_question = (
+                        f"Файл содержит следующий текст:"
+                        f" {truncated_extracted_text}\n\n"
+                        f" Вопрос: {truncated_user_message}"
+                    )
+                    await update.message.reply_text(
+                        f"Вопрос сокращен до {len(truncated_user_message)} с."
+                        f"для укладывания в лимиты вместе с содержимым файла."
+                    )
+                else:
+                    # The issue might be with accumulated context history,
+                    # not the question length
+                    # We'll proceed with the original augmented question
+                    # and let the later truncation handle it
+                    pass
+            else:
+                # Not enough tokens even for the file content and header,
+                # so truncate everything
+                max_total_chars = max_content_tokens * avg_token_size
+                augmented_question = augmented_question[:max_total_chars]
+                await update.message.reply_text(
+                    f"Общий объем текста (файл+вопрос) сокращен"
+                    f"до {max_total_chars} символов для укладывания в лимиты."
+                )
 
         print(
             f"model {model_name} max tokens {max_tokens}"
@@ -766,34 +814,6 @@ async def handle_message_or_voice(
     # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
     initialize_user_context(user_id, current_mode)
 
-    # Handle file uploads in file_analysis mode
-    if current_mode == "ai_file":
-        await handle_ai_file_mode(
-            update,
-            context,
-            user_id,
-            "",
-            cost,
-            balance,
-        )
-        return  # End here for file analysis mode
-
-    # --- ПРОВЕРКА НАЛИЧИЯ МОНЕТ ---
-    user_data, coins, giftcoins, balance, cost = (
-        await billing_utils.check_user_coins(user_id, current_mode, context)
-    )
-    if user_data is None:
-        return  # Прерываем выполнение, если монет не хватает
-    # --- ПРОВЕРКА ЗАВЕРШЕНА ---
-
-    # Обработка режима редактирования изображений
-    if current_mode == "edit":
-        await handle_edit_mode(update, context, user_id, "", cost, balance)
-        return
-
-    # === ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ КОНТЕКСТА ДЛЯ ТЕКУЩЕГО РЕЖИМА ===
-    initialize_user_context(user_id, current_mode)
-
     # Проверяем, является ли сообщение голосовым
     if update.message.voice:
         result = await handle_voice_message(
@@ -805,8 +825,31 @@ async def handle_message_or_voice(
     elif update.message.text:
         # Обычное текстовое сообщение
         user_message = update.message.text.strip()
+    elif update.message.document or update.message.photo:
+        # File or photo message - we'll pass empty string as user_message
+        # and let the mode handler process the file
+        user_message = ""
     else:
-        return  # Не текст и не голос
+        return  # Не текст, не голос и не файл
+
+    # Handle file uploads in file_analysis mode
+    if current_mode == "ai_file":
+        await handle_ai_file_mode(
+            update,
+            context,
+            user_id,
+            user_message,
+            cost,
+            balance,
+        )
+        return  # End here for file analysis mode
+
+    # Обработка режима редактирования изображений
+    if current_mode == "edit":
+        await handle_edit_mode(
+            update, context, user_id, user_message, cost, balance
+        )
+        return
 
     # Обработка в зависимости от режима
     if current_mode == "image":
