@@ -1,8 +1,11 @@
 """Configuration for AI models used by the bot."""
+
 import os
 import io
 from dotenv import load_dotenv
-import google.generativeai as genai
+
+# import google.generativeai as genai
+from google import genai
 from openai import OpenAI
 import token_utils
 
@@ -19,13 +22,13 @@ client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
 client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
 
 # Инициализация клиента Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+client_edit_image = genai.Client(api_key=GEMINI_API_KEY)
 
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.2",
     "image": "dall-e-3",
-    "edit": "gemini-2.5-flash-preview-image",
+    "edit": "gemini-2.5-flash-image",
     "ai_file": "gpt-5.2",
 }
 
@@ -35,12 +38,8 @@ SYSTEM_PROMPTS = {
         "Use web search only when your knowledge may be outdated "
         "or when the user explicitly asks for fresh data."
     ),
-    "image": (
-        "Ты помогаешь генерировать изображения."
-    ),
-    "edit": (
-        "Ты помогаешь редактировать изображения с помощью Gemini."
-    ),
+    "image": ("Ты помогаешь генерировать изображения."),
+    "edit": ("Ты помогаешь редактировать изображения с помощью Gemini."),
     "ai_file": (
         "Ты помощник по анализу документов."
         "Отвечай на вопросы касательно "
@@ -56,38 +55,48 @@ COST_PER_MESSAGE = {
 }
 
 
-async def get_gemini_models_info() -> str:
+def get_gemini_models_info() -> str:
     """
     Возвращает информацию о доступных моделях Gemini в виде строки.
     """
+
     try:
-        models = genai.list_models()
+        models = client_edit_image.models.list()
         lines = ["🤖 Доступные модели Gemini:\n"]
+        lines = ["🤖 Доступные модели Gemini:\n"]
+
         for model in models:
+            # Имя модели теперь в атрибуте 'name'
             model_id = model.name.split("/")[-1]
             input_tokens = model.input_token_limit
             output_tokens = model.output_token_limit
-            methods = ", ".join(model.supported_generation_methods)
+
+            # Новый атрибут 'supported_actions' вместо 
+            # 'supported_generation_methods'
+            methods = ", ".join(model.supported_actions)
+
+            # Температура может быть не у всех моделей
             temp = (
                 f"{model.temperature:.1f}"
-                if model.temperature
+                if hasattr(model, "temperature")
+                and model.temperature is not None
                 else "не задана"
             )
 
             lines.append(
-                f"🔹 *{model_id}*"
-                f"\n   Вход: `{input_tokens}` токенов"
-                f"\n   Выход: `{output_tokens}` токенов"
-                f"\n   Режимы: `{methods}`"
-                f"\n   Температура: `{temp}`"
-                f"\n"
+                f"🔹 *{model_id}*\n"
+                f" Вход: {input_tokens} токенов\n"
+                f" Выход: {output_tokens} токенов\n"
+                f" Методы: {methods}\n"
+                f" Температура: {temp}\n"
             )
+
         return "\n".join(lines)
     except Exception as e:
-        return f"❌ Ошибка при получении моделей Gemini: `{str(e)}`"
+        return f"❌ Ошибка при получении моделей Gemini: {str(e)}"
 
 
-async def get_openai_models_info() -> str:
+def get_openai_models_info() -> str:
     try:
         # УБИРАЕМ await — вызов синхронный!
         models = client_image.models.list()
@@ -99,7 +108,7 @@ async def get_openai_models_info() -> str:
         return f"❌ Ошибка: `{e}`"
 
 
-def ask_gpt51_with_web_search(
+async def ask_gpt51_with_web_search(
     context_history: list,
     enable_web_search: bool = True,
 ) -> str:
@@ -193,7 +202,7 @@ async def edit_image_with_gemini(
         # Подготовка изображения для Gemini
         original_image.seek(0)
         # Создаем модель Gemini
-        model = genai.GenerativeModel(model_name)
+        model = client_edit_image.GenerativeModel(model_name)
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
         Проанализируй это изображение и выполни следующие изменения: {prompt}
@@ -204,7 +213,7 @@ async def edit_image_with_gemini(
         4. Верни только измененное изображение без дополнительного текста
         """
         # Отправляем изображение и промпт в Gemini
-        response = model.generate_content(
+        response = client_edit_image.models.generate_content(
             [
                 gemini_prompt,
                 {"mime_type": "image/png", "data": original_image.getvalue()},

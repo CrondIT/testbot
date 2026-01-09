@@ -153,7 +153,7 @@ def get_token_limit(model_name: str) -> int:
         # Gemini models
         "gemini-2.5-flash-preview-image": 1048576,
         "gemini-2.5-pro": 2097152,
-        "gemini-2.0-flash-exp": 1048576,
+        "gemini-2.5-flash-image": 32768,
         "gemini-1.5-pro": 1048576,
         "gemini-1.0-pro": 32768,
     }
