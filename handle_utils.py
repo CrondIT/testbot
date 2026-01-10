@@ -4,7 +4,6 @@ messages, and edit modes."""
 import os
 import io
 from PIL import Image
-import google.generativeai as genai
 import dbbot
 import token_utils
 import file_utils
@@ -82,65 +81,6 @@ def initialize_user_context(user_id: int, current_mode: str):
         ]
 
 
-async def edit_image_with_gemini(
-    original_image: io.BytesIO, prompt: str
-) -> str:
-    """Редактирует изображение с помощью Gemini 2.5 Flash"""
-    model_name = models_config.MODELS["edit"]  # Используем константу
-    try:
-        # Проверяем длину промпта на токены
-        prompt_tokens = token_utils.token_counter.count_openai_tokens(
-            prompt, model_name
-        )
-        max_tokens = token_utils.get_token_limit(model_name)
-
-        if prompt_tokens > max_tokens:
-            # Обрезаем промпт до допустимого размера
-            avg_token_size = 4  # средний размер токена в символах
-            max_chars = max_tokens * avg_token_size
-            prompt = prompt[:max_chars]
-
-        # Подготовка изображения для Gemini
-        original_image.seek(0)
-        # Создаем модель Gemini
-        model = genai.GenerativeModel(model_name)
-        # Подготавливаем промпт для Gemini
-        gemini_prompt = f"""
-        Проанализируй это изображение и выполни следующие изменения: {prompt}
-        Важные инструкции:
-        1. Внеси именно те изменения, которые запрошены пользователем
-        2. Сохрани общий стиль и качество изображения
-        3. Если запрос неясен, уточни у пользователя
-        4. Верни только измененное изображение без дополнительного текста
-        """
-        # Отправляем изображение и промпт в Gemini
-        response = model.generate_content(
-            [
-                gemini_prompt,
-                {"mime_type": "image/png", "data": original_image.getvalue()},
-            ]
-        )
-        # Проверяем, содержит ли ответ изображение
-        if hasattr(response, "candidates") and response.candidates:
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, "inline_data"):
-                    # Возвращаем данные изображения
-                    return part.inline_data.data
-                elif hasattr(part, "text"):
-                    # Если Gemini вернул текст вместо изображения
-                    raise Exception(
-                        f"""
-                        ИИ вернул текстовый ответ вместо изображения:
-                        {part.text}"""
-                    )
-        # Если не нашли изображение в ответе
-        raise Exception("Gemini не вернул изображение в ответе")
-    except Exception as e:
-        raise Exception(
-            f"Ошибка редактирования изображения с помощью ИИ: {str(e)}"
-        )
-
-
 async def handle_edit_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -164,7 +104,6 @@ async def handle_edit_mode(
             await update.message.reply_text(
                 "✅ Изображение получено и конвертировано в PNG. "
                 "Теперь опишите, что нужно изменить в изображении "
-                "(используется Gemini 2.5 Flash)."
             )
         return
     # Если пользователь отправил текст
@@ -176,7 +115,7 @@ async def handle_edit_mode(
             try:
                 original_image = user_edit_data[user_id]["original_image"]
                 # Редактируем изображение с помощью Gemini
-                edited_image_data = await edit_image_with_gemini(
+                edited_image_data = await models_config.edit_image_with_gemini(
                     original_image, user_message
                 )
                 # Сохраняем изображение во временный файл
@@ -801,7 +740,6 @@ async def handle_message_or_voice(
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
-    print(f"we are in handle message or voice, mode {current_mode}")
 
     # --- start coins check ---
     user_data, coins, giftcoins, balance, cost = (
@@ -867,7 +805,6 @@ async def handle_message_or_voice(
 
     # Для режима chat используем специальную функцию с возможностью веб-поиска
     if current_mode == "chat":
-        print(f"we are in handle message or voice in mode {current_mode}")
         await handle_chat_mode(
             update,
             context,

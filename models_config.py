@@ -4,9 +4,11 @@ import os
 import io
 from dotenv import load_dotenv
 
-# import google.generativeai as genai
 from google import genai
 from openai import OpenAI
+
+import base64
+
 import token_utils
 
 # Загрузить переменные из файла .env
@@ -20,7 +22,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Инициализация клиентов OpenAI для разных режимов
 client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
 client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
-
 # Инициализация клиента Gemini
 client_edit_image = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -55,7 +56,7 @@ COST_PER_MESSAGE = {
 }
 
 
-def get_gemini_models_info() -> str:
+async def get_gemini_models_info() -> str:
     """
     Возвращает информацию о доступных моделях Gemini в виде строки.
     """
@@ -71,7 +72,7 @@ def get_gemini_models_info() -> str:
             input_tokens = model.input_token_limit
             output_tokens = model.output_token_limit
 
-            # Новый атрибут 'supported_actions' вместо 
+            # Новый атрибут 'supported_actions' вместо
             # 'supported_generation_methods'
             methods = ", ".join(model.supported_actions)
 
@@ -96,7 +97,7 @@ def get_gemini_models_info() -> str:
         return f"❌ Ошибка при получении моделей Gemini: {str(e)}"
 
 
-def get_openai_models_info() -> str:
+async def get_openai_models_info() -> str:
     try:
         # УБИРАЕМ await — вызов синхронный!
         models = client_image.models.list()
@@ -201,10 +202,11 @@ async def edit_image_with_gemini(
 
         # Подготовка изображения для Gemini
         original_image.seek(0)
-        # Создаем модель Gemini
-        model = client_edit_image.GenerativeModel(model_name)
+        image_bytes = original_image.read()
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         # Подготавливаем промпт для Gemini
         gemini_prompt = f"""
+        Оригинальное изображение: {image_base64[:100]}...
         Проанализируй это изображение и выполни следующие изменения: {prompt}
         Важные инструкции:
         1. Внеси именно те изменения, которые запрошены пользователем
@@ -214,10 +216,8 @@ async def edit_image_with_gemini(
         """
         # Отправляем изображение и промпт в Gemini
         response = client_edit_image.models.generate_content(
-            [
-                gemini_prompt,
-                {"mime_type": "image/png", "data": original_image.getvalue()},
-            ]
+            model=model_name,
+            contents=[gemini_prompt],
         )
         # Проверяем, содержит ли ответ изображение
         if hasattr(response, "candidates") and response.candidates:
@@ -236,7 +236,7 @@ async def edit_image_with_gemini(
         raise Exception("Gemini не вернул изображение в ответе")
     except Exception as e:
         raise Exception(
-            f"Ошибка редактирования изображения с помощью ИИ: {str(e)}"
+            f"Ошибка редактирования изображения: {str(e)}"
         )
 
 
