@@ -125,3 +125,69 @@ def parse_formatting_request(user_request):
     ):
         formatting_instructions["headings"] = True
     return formatting_instructions
+
+
+def check_user_wants_word_format(user_message):
+    """
+    Check if user wants to receive description in Word format.
+
+    Args:
+        user_message (str): The message from user to analyze
+
+    Returns:
+        bool: True if user wants Word format, False otherwise
+    """
+    message = user_message.lower()
+    return (
+        "word" in message
+        or "формат word" in message
+        or "docx" in message
+        or "в ворде" in message
+        or "в формате документа" in message
+        or "word документ" in message
+        or "документ word" in message
+        or "в microsoft word" in message
+        or "в формате ворд" in message
+        or "в формате word" in message
+        or "в документе word" in message
+        or "в word формате" in message
+        or "в ворд формате" in message
+        or "в вордовском формате" in message
+        or "в формате ворда" in message
+    )
+
+
+def clean_content_for_docx(content):
+    """
+    Clean content by removing markdown formatting and unnecessary mentions
+    of DOCX formatting capabilities.
+
+    Args:
+        content (str): The content to clean
+
+    Returns:
+        str: Cleaned content without markdown formatting
+    """
+    import re
+
+    # Remove bold markers (**)
+    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', content)
+
+    # Remove italic markers (* or _)
+    cleaned = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\1', cleaned)
+    cleaned = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'\1', cleaned)
+
+    # Remove unnecessary mentions about DOCX formatting
+    cleaned = re.sub(r'Если хотите, могу оформить это как \*\*готовый \.DOCX\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'Могу оформить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'Я могу предоставить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'Вот ваш текст в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'При необходимости могу оформить это как \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'Могу подготовить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'Могу оформить в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+
+    # Remove extra whitespace that might result from removals
+    cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
+    cleaned = cleaned.strip()
+
+    return cleaned

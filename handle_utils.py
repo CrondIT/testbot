@@ -9,6 +9,7 @@ import token_utils
 import file_utils
 import billing_utils
 import models_config
+import docx_utils
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
@@ -118,16 +119,85 @@ async def handle_edit_mode(
                 edited_image_data = await models_config.edit_image_with_gemini(
                     original_image, user_message
                 )
+                # Проверяем, хочет ли пользователь
+                #  получить описание в формате Word
+                wants_word_format = docx_utils.check_user_wants_word_format(
+                    user_message
+                )
+
                 # Сохраняем изображение во временный файл
                 file_path = await save_image_from_data(
                     edited_image_data, f"edited_{user_id}"
                 )
-                # Отправляем отредактированное изображение
-                with open(file_path, "rb") as photo:
-                    await update.message.reply_photo(
-                        photo,
-                        caption=f"Отредактировано по запросу: {user_message}",
-                    )
+
+                if wants_word_format:
+                    # Создаем DOCX файл с описанием редактирования
+                    try:
+                        # Создаем текст описания
+                        description_text = (
+                            f"Отредактированное изображение\n\n"
+                            f"Запрос на редактирование: {user_message}\n\n"
+                            f"Изображение было отредактировано по запросу."
+                        )
+
+                        # Парсим запрос пользователя на предмет форматирования
+                        formatting_instructions = (
+                            docx_utils.parse_formatting_request(user_message)
+                        )
+
+                        # Очищаем содержимое от форматирования
+                        # и упоминаний о DOCX
+                        clean_description_text = (
+                            docx_utils.clean_content_for_docx(description_text)
+                        )
+
+                        # Создаем DOCX файл
+                        docx_file = docx_utils.create_formatted_docx(
+                            clean_description_text, formatting_instructions
+                        )
+                        # Убедимся, что указатель находится в начале файла
+                        docx_file.seek(0)
+
+                        # Отправляем DOCX файл пользователю и изображение
+                        await update.message.reply_document(
+                            document=docx_file,
+                            filename="document.docx",
+                            caption="""
+                            Описание отредактированного изображения
+                            в формате Word (DOCX)""",
+                        )
+                        with open(file_path, "rb") as photo:
+                            await update.message.reply_photo(
+                                photo,
+                                caption=(
+                                    f"Отредактировано"
+                                    f" по запросу: {user_message}"
+                                ),
+                            )
+                    except Exception as e:
+                        # Если не удалось создать или отправить DOCX,
+                        # отправляем обычное сообщение
+                        with open(file_path, "rb") as photo:
+                            await update.message.reply_photo(
+                                photo,
+                                caption=(
+                                    f"Отредактировано"
+                                    f" по запросу: {user_message}"
+                                ),
+                            )
+                        print(
+                            f"Ошибка при создании или отправке DOCX файла: {e}"
+                        )
+                else:
+                    # Отправляем обычное изображение
+                    with open(file_path, "rb") as photo:
+                        await update.message.reply_photo(
+                            photo,
+                            caption=(
+                                f"Отредактировано по запросу: {user_message}"
+                            ),
+                        )
+
                 # Удаляем временный файл
                 os.remove(file_path)
                 # Сбрасываем состояние редактирования
@@ -341,7 +411,7 @@ async def handle_ai_file_mode(
             content_and_header_text = (
                 f"Файл содержит следующий текст: "
                 f"{truncated_extracted_text}\n\nВопрос: "
-                )
+            )
             content_and_header_tokens = (
                 token_utils.token_counter.count_openai_tokens(
                     content_and_header_text, model_name
@@ -467,7 +537,7 @@ async def handle_ai_file_mode(
                 + truncated_history
                 + [{"role": "user", "content": augmented_question}]
             )
-            reply = models_config.ask_gpt51_with_web_search(
+            reply = await models_config.ask_gpt51_with_web_search(
                 context_history=full_context,
                 enable_web_search=False,
             )
@@ -482,13 +552,51 @@ async def handle_ai_file_mode(
                 {"role": "assistant", "content": reply}
             )
 
-            # Отправляем ответ
-            # Экранируем специальные символы Markdown,
-            # чтобы избежать ошибок
-            safe_reply = escape_markdown(reply, version=2)
-            await send_long_message(
-                update, safe_reply, parse_mode="MarkdownV2"
+            # Проверяем, хочет ли пользователь получить ответ в формате Word
+            wants_word_format = docx_utils.check_user_wants_word_format(
+                user_message
             )
+
+            if wants_word_format:
+                # Создаем DOCX файл с ответом
+                try:
+                    # Парсим запрос пользователя на предмет форматирования
+                    formatting_instructions = (
+                        docx_utils.parse_formatting_request(user_message)
+                    )
+
+                    # Очищаем содержимое от форматирования и упоминаний о DOCX
+                    clean_reply = docx_utils.clean_content_for_docx(reply)
+
+                    # Создаем DOCX файл
+                    docx_file = docx_utils.create_formatted_docx(
+                        clean_reply, formatting_instructions
+                    )
+                    # Убедимся, что указатель находится в начале файла
+                    docx_file.seek(0)
+
+                    # Отправляем DOCX файл пользователю
+                    await update.message.reply_document(
+                        document=docx_file,
+                        filename="document.docx",
+                        caption="Ваш ответ в формате Word (DOCX)",
+                    )
+                except Exception as e:
+                    # Если не удалось создать или отправить DOCX,
+                    # отправляем обычное сообщение
+                    safe_reply = escape_markdown(reply, version=2)
+                    await send_long_message(
+                        update, safe_reply, parse_mode="MarkdownV2"
+                    )
+                    print(f"Ошибка при создании или отправке DOCX файла: {e}")
+            else:
+                # Отправляем обычный ответ
+                # Экранируем специальные символы Markdown,
+                # чтобы избежать ошибок
+                safe_reply = escape_markdown(reply, version=2)
+                await send_long_message(
+                    update, safe_reply, parse_mode="MarkdownV2"
+                )
 
             # Списываем монеты и записываем лог
             from billing_utils import check_user_coins
@@ -503,7 +611,7 @@ async def handle_ai_file_mode(
                 giftcoins,
                 "ai_file",
                 user_message,
-                safe_reply,
+                reply,  # Сохраняем оригинальный ответ в логах
             )
         except Exception as e:
             # Обработка ошибки "Message is too long" и других
@@ -545,11 +653,67 @@ async def handle_image_mode(
 
     # Режим генерации изображений
     await update.message.reply_text("🎨 Генерирую изображение...")
+
+    # Проверяем, хочет ли пользователь получить описание в формате Word
+    wants_word_format = docx_utils.check_user_wants_word_format(user_message)
+
     try:
         image_url = await models_config.generate_image(user_message)
-        await update.message.reply_photo(
-            image_url, caption=f"Сгенерировано по запросу: {user_message}"
-        )
+
+        if wants_word_format:
+            # Создаем DOCX файл с описанием изображения
+            try:
+                # Создаем простой текст описания
+                description_text = (
+                    f"Сгенерированное изображение\n\n"
+                    f" Запрос: {user_message}\n\n"
+                    f" Изображение было сгенерировано по вашему запросу."
+                )
+
+                # Парсим запрос пользователя на предмет форматирования
+                formatting_instructions = docx_utils.parse_formatting_request(
+                    user_message
+                )
+
+                # Очищаем содержимое от форматирования и упоминаний о DOCX
+                clean_description_text = docx_utils.clean_content_for_docx(
+                    description_text
+                )
+
+                # Создаем DOCX файл
+                docx_file = docx_utils.create_formatted_docx(
+                    clean_description_text, formatting_instructions
+                )
+                # Убедимся, что указатель находится в начале файла
+                docx_file.seek(0)
+
+                # Отправляем DOCX файл пользователю и изображение
+                await update.message.reply_document(
+                    document=docx_file,
+                    filename="document.docx",
+                    caption="""
+                        Описание сгенерированного изображения
+                        в формате Word (DOCX)
+                        """,
+                )
+                await update.message.reply_photo(
+                    image_url,
+                    caption=f"Сгенерировано по запросу: {user_message}",
+                )
+            except Exception as e:
+                # Если не удалось создать или отправить DOCX,
+                # отправляем обычное сообщение
+                await update.message.reply_photo(
+                    image_url,
+                    caption=f"Сгенерировано по запросу: {user_message}",
+                )
+                print(f"Ошибка при создании или отправке DOCX файла: {e}")
+        else:
+            # Отправляем обычное изображение
+            await update.message.reply_photo(
+                image_url, caption=f"Сгенерировано по запросу: {user_message}"
+            )
+
         # Списываем монеты и записываем лог
         spend_coins(user_id, cost, coins, giftcoins, "image", user_message, "")
     except Exception as e:
@@ -660,7 +824,7 @@ async def handle_chat_mode(
         if len(user_context) > MAX_CONTEXT_MESSAGES:
             user_context = user_context[-MAX_CONTEXT_MESSAGES:]
 
-        reply = models_config.ask_gpt51_with_web_search(
+        reply = await models_config.ask_gpt51_with_web_search(
             enable_web_search=True,
             context_history=user_context,
         )
@@ -673,13 +837,53 @@ async def handle_chat_mode(
             {"role": "assistant", "content": reply}
         )
 
-        # Отправляем ответ
-        # Экранируем специальные символы Markdown, чтобы избежать ошибок
-        safe_reply = escape_markdown(reply, version=2)
+        # Проверяем, хочет ли пользователь получить ответ в формате Word
+        wants_word_format = docx_utils.check_user_wants_word_format(
+            user_message
+        )
 
-        # Send the message, splitting if necessary
-        # to respect Telegram's character limit
-        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
+        if wants_word_format:
+            # Создаем DOCX файл с ответом
+            try:
+                # Парсим запрос пользователя на предмет форматирования
+                formatting_instructions = docx_utils.parse_formatting_request(
+                    user_message
+                )
+
+                # Очищаем содержимое от форматирования и упоминаний о DOCX
+                clean_reply = docx_utils.clean_content_for_docx(reply)
+
+                # Создаем DOCX файл
+                docx_file = docx_utils.create_formatted_docx(
+                    clean_reply, formatting_instructions
+                )
+                # Убедимся, что указатель находится в начале файла
+                docx_file.seek(0)
+
+                # Отправляем DOCX файл пользователю
+                await update.message.reply_document(
+                    document=docx_file,
+                    filename="document.docx",
+                    caption="Ваш ответ в формате Word (DOCX)",
+                )
+            except Exception as e:
+                # Если не удалось создать или отправить DOCX,
+                # отправляем обычное сообщение
+                safe_reply = escape_markdown(reply, version=2)
+                await send_long_message(
+                    update, safe_reply, parse_mode="MarkdownV2"
+                )
+                print(f"Ошибка при создании или отправке DOCX файла: {e}")
+        else:
+            # Отправляем обычный ответ
+            # Экранируем специальные символы Markdown, чтобы избежать ошибок
+            safe_reply = escape_markdown(reply, version=2)
+
+            # Send the message, splitting if necessary
+            # to respect Telegram's character limit
+            await send_long_message(
+                update, safe_reply, parse_mode="MarkdownV2"
+            )
 
         # Списываем монеты и записываем лог
         spend_coins(
@@ -689,7 +893,7 @@ async def handle_chat_mode(
             giftcoins,
             "chat",
             user_message,
-            safe_reply,
+            reply,  # Сохраняем оригинальный ответ в логах
         )
     except Exception as e:
         # LOGGING ====================
