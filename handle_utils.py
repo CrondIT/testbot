@@ -20,6 +20,9 @@ from global_state import (
     user_file_data,
     MAX_CONTEXT_MESSAGES,
 )
+import json
+from docx import Document
+from telegram import InputFile
 
 
 async def download_and_convert_image(
@@ -806,6 +809,24 @@ async def handle_chat_mode(
         # Include chat history for context with proper token limit
         model_name = models_config.MODELS.get("chat")
         user_context = []
+        # Проверяем, хочет ли пользователь получить ответ в формате Word
+        wants_word_format = docx_utils.check_user_wants_word_format(
+            user_message
+        )
+        if wants_word_format:
+            user_message = user_message + """
+               Верни ТОЛЬКО валидный JSON без пояснений.
+                Строгая схема:
+                {
+                "meta": {"title": "string"},
+                "blocks": [
+                    {"type":"heading","level":1,"text":"string"},
+                    {"type":"paragraph","text":"string"},
+                    {"type":"list", "ordered":false, "items":["item1", "item2"]},
+                    {"type":"table", "headers":["column1", "column2"], "rows":[["value1", "value2"], ["value3", "value4"]]}
+                ]
+                }
+            """
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
             temp_history = user_contexts[user_id]["chat"] + [
@@ -837,34 +858,19 @@ async def handle_chat_mode(
             {"role": "assistant", "content": reply}
         )
 
-        # Проверяем, хочет ли пользователь получить ответ в формате Word
-        wants_word_format = docx_utils.check_user_wants_word_format(
-            user_message
-        )
-
         if wants_word_format:
             # Создаем DOCX файл с ответом
             try:
-                # Парсим запрос пользователя на предмет форматирования
-                formatting_instructions = docx_utils.parse_formatting_request(
-                    user_message
-                )
+                data = json.loads(reply)
 
-                # Очищаем содержимое от форматирования и упоминаний о DOCX
-                clean_reply = docx_utils.clean_content_for_docx(reply)
+                doc_io = io.BytesIO()
+                renderer = docx_utils.DocxRenderer()
+                renderer.render(data, doc_io)
+                doc_io.seek(0)
 
-                # Создаем DOCX файл
-                docx_file = docx_utils.create_formatted_docx(
-                    clean_reply, formatting_instructions
-                )
-                # Убедимся, что указатель находится в начале файла
-                docx_file.seek(0)
-
-                # Отправляем DOCX файл пользователю
                 await update.message.reply_document(
-                    document=docx_file,
-                    filename="document.docx",
-                    caption="Ваш ответ в формате Word (DOCX)",
+                    document=InputFile(doc_io, filename="document.docx"),
+                    caption="Ваш ответ в формате Word",
                 )
             except Exception as e:
                 # Если не удалось создать или отправить DOCX,

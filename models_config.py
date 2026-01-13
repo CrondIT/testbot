@@ -27,10 +27,10 @@ client_edit_image = genai.Client(api_key=GEMINI_API_KEY)
 
 # Модели для разных режимов
 MODELS = {
-    "chat": "gpt-5.2",
+    "chat": "gpt-5.2-chat-latest",
     "image": "dall-e-3",
     "edit": "gemini-2.5-flash-image",
-    "ai_file": "gpt-5.2",
+    "ai_file": "gpt-5.2-chat-latest",
 }
 
 SYSTEM_PROMPTS = {
@@ -136,7 +136,6 @@ async def ask_gpt51_with_web_search(
                 "type": "web_search",
             }
         )
-
     try:
         response = client_chat.responses.create(
             model="gpt-5.2",

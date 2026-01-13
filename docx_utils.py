@@ -9,6 +9,103 @@ import re
 import io
 
 
+class DocxRenderer:
+    def __init__(self):
+        self.doc = Document()
+
+    def render(self, data: dict, output):
+        """
+        Рендерим JSON документ в DOCX.
+        :param data: dict с ключами "meta" и "blocks"
+        :param output: path или BytesIO
+        """
+        self._render_meta(data.get("meta", {}))
+
+        for block in data.get("blocks", []):
+            self._render_block(block)
+
+        # Сохраняем в файл или BytesIO
+        self.doc.save(output)
+
+    def _render_meta(self, meta: dict):
+        if "title" in meta:
+            title = self.doc.add_heading(meta["title"], level=1)
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    def _render_block(self, block: dict):
+        block_type = block.get("type")
+
+        if block_type == "heading":
+            self._heading(block)
+        elif block_type == "paragraph":
+            self._paragraph(block)
+        elif block_type == "list":
+            self._list(block)
+        elif block_type == "table":
+            self._table(block)
+        else:
+            raise ValueError(f"Unknown block type: {block_type}")
+
+    def _heading(self, block: dict):
+        level = block.get("level", 1)
+        text = block.get("text", "")
+        self.doc.add_heading(text, level=level)
+
+    def _paragraph(self, block: dict):
+        p = self.doc.add_paragraph()
+        run = p.add_run(block.get("text", ""))
+
+        if block.get("bold"):
+            run.bold = True
+        if block.get("italic"):
+            run.italic = True
+
+        align = block.get("align")
+        if align == "center":
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif align == "right":
+            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    def _list(self, block: dict):
+        ordered = block.get("ordered", False)
+        style = "List Number" if ordered else "List Bullet"
+
+        for item in block.get("items", []):
+            self.doc.add_paragraph(item, style=style)
+
+    def _table(self, block: dict):
+        """
+        Рендерим таблицу.
+        JSON-схема:
+        {
+            "type": "table",
+            "headers": ["Колонка1", "Колонка2"],
+            "rows": [
+                ["Значение1", "Значение2"]
+            ]
+        }
+        """
+        headers = block.get("headers", [])
+        rows = block.get("rows", [])
+
+        if not headers or not rows:
+            return  # Пустая таблица — ничего не делаем
+
+        table = self.doc.add_table(rows=1, cols=len(headers))
+        table.style = "Table Grid"  # красивый стиль с границами
+
+        # Заголовки
+        hdr_cells = table.rows[0].cells
+        for i, header in enumerate(headers):
+            hdr_cells[i].text = str(header)
+
+        # Данные
+        for row in rows:
+            cells = table.add_row().cells
+            for i, value in enumerate(row):
+                cells[i].text = str(value)
+                
+
 def create_formatted_docx(text_content, formatting_instructions=None):
     """
     Create a formatted DOCX document from text content
