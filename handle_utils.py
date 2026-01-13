@@ -814,19 +814,8 @@ async def handle_chat_mode(
             user_message
         )
         if wants_word_format:
-            user_message = user_message + """
-               Верни ТОЛЬКО валидный JSON без пояснений.
-                Строгая схема:
-                {
-                "meta": {"title": "string"},
-                "blocks": [
-                    {"type":"heading","level":1,"text":"string"},
-                    {"type":"paragraph","text":"string"},
-                    {"type":"list", "ordered":false, "items":["item1", "item2"]},
-                    {"type":"table", "headers":["column1", "column2"], "rows":[["value1", "value2"], ["value3", "value4"]]}
-                ]
-                }
-            """
+            user_message = user_message + docx_utils.JSON_SCHEMA
+
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
             temp_history = user_contexts[user_id]["chat"] + [
@@ -881,12 +870,10 @@ async def handle_chat_mode(
                 )
                 print(f"Ошибка при создании или отправке DOCX файла: {e}")
         else:
-            # Отправляем обычный ответ
             # Экранируем специальные символы Markdown, чтобы избежать ошибок
             safe_reply = escape_markdown(reply, version=2)
 
             # Send the message, splitting if necessary
-            # to respect Telegram's character limit
             await send_long_message(
                 update, safe_reply, parse_mode="MarkdownV2"
             )
