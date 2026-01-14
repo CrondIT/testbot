@@ -26,11 +26,6 @@ import dbbot
 import models_config
 import billing_utils
 from handle_utils import handle_message_or_voice
-from handle_utils import (
-    handle_get_docx_command,
-    handle_get_pdf_command,
-    handle_get_text_command,
-)
 from message_utils import send_long_message
 
 
@@ -375,10 +370,6 @@ def main():
             handle_message_or_voice,
         )
     )
-    # Обработчики команд выбора формата
-    app.add_handler(CommandHandler("get_docx", handle_get_docx_command))
-    app.add_handler(CommandHandler("get_pdf", handle_get_pdf_command))
-    app.add_handler(CommandHandler("get_text", handle_get_text_command))
 
     # Обработчик нажатий на кнопки
     app.add_handler(CallbackQueryHandler(button_handler))

@@ -4,6 +4,7 @@ import re
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches
+
 # from docx.oxml.shared import OxmlElement
 import io
 import json
@@ -11,6 +12,7 @@ from telegram import InputFile
 from telegram.helpers import escape_markdown
 import matplotlib
 import matplotlib.pyplot as plt
+
 # from pylatexenc.latex2text import LatexNodes2Text
 # from latex2mathml.converter import convert
 
@@ -30,36 +32,44 @@ def clean_html_tags(text):
         return str(text)
 
     # Удаляем span теги и их атрибуты
-    text = re.sub(r'<span[^>]*>', '', text)
-    text = re.sub(r'</span>', '', text)
+    text = re.sub(r"<span[^>]*>", "", text)
+    text = re.sub(r"</span>", "", text)
 
     # Удаляем другие теги
-    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r"<[^>]+>", "", text)
 
     # Удаляем двойные звездочки (жирный текст в markdown)
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
 
     # Удаляем одинарные звездочки (курсив в markdown)
-    text = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\1', text)
+    text = re.sub(r"(?<!\*)\*([^\*]+?)\*(?!\*)", r"\1", text)
 
     # Удаляем подчеркивания (курсив в markdown)
-    text = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'\1', text)
+    text = re.sub(r"(?<!_)_([^_]+?)_(?!_)", r"\1", text)
 
     return text.strip()
+
 
 matplotlib.use("Agg")  # Use non-interactive backend
 
 JSON_SCHEMA = """
     Верни ТОЛЬКО валидный JSON без пояснений.
+    Не используй markdown, только JSON.
+    Не включай тройные кавычки в значениях.
     Строгая схема:
     {
     "meta": {"title": "string"},
     "blocks": [
-        {"type":"heading","level":1,"text":"string", "font_name":"string", "font_size":12, "color":"string", "bold":false, "italic":false},
-        {"type":"paragraph","text":"string", "font_name":"string", "font_size":12, "left_indent":0, "right_indent":0, "space_after":12, "alignment":"left", "color":"string", "bold":false, "italic":false, "underline":false},
-        {"type":"list", "ordered":false, "font_name":"string", "font_size":12, "left_indent":0, "right_indent":0, "space_after":12, "alignment":"left", "color":"string", "bold":false, "italic":false,
-            "items":["item1", "item2"]
-        },
+        {"type":"heading","level":1,"text":"string", "font_name":"string",
+        "font_size":12, "color":"string", "bold":false, "italic":false},
+        {"type":"paragraph","text":"string", "font_name":"string",
+        "font_size":12, "left_indent":0, "right_indent":0, "space_after":12,
+        "alignment":"left", "color":"string", "bold":false, "italic":false,
+        "underline":false},
+        {"type":"list", "ordered":false, "font_name":"string", "font_size":12,
+        "left_indent":0, "right_indent":0, "space_after":12,
+        "alignment":"left", "color":"string", "bold":false, "italic":false,
+        "items":["item1", "item2"]},
         {"type":"table", "headers":["column1", "column2"],
            "rows":[["value1", "value2"], ["value3", "value4"]],
            "params": {
@@ -77,7 +87,10 @@ JSON_SCHEMA = """
                "header_bg_color":"string"
            }
         },
-        {"type":"math", "formula":"LaTeX formula", "caption":"optional caption", "font_name":"string", "font_size":12, "math_font_size":12, "caption_font_size":10, "bold":false, "italic":true, "alignment":"left", "color":"string"}
+        {"type":"math", "formula":"LaTeX formula",
+        "caption":"optional caption", "font_name":"string",
+        "font_size":12, "math_font_size":12, "caption_font_size":10,
+        "bold":false, "italic":true, "alignment":"left", "color":"string"}
     ]
     }
     """
@@ -141,6 +154,7 @@ class DocxRenderer:
                 run.font.name = font_name
             if font_size:
                 from docx.shared import Pt
+
                 run.font.size = Pt(font_size)
             if bold is not None:
                 run.font.bold = bold
@@ -149,6 +163,7 @@ class DocxRenderer:
             if color:
                 # Для цвета нужно импортировать RGBColor
                 from docx.shared import RGBColor
+
                 # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                 if len(color) == 6:
                     r = int(color[0:2], 16)
@@ -181,9 +196,11 @@ class DocxRenderer:
             run.font.name = font_name
         if font_size:
             from docx.shared import Pt
+
             run.font.size = Pt(font_size)
         if color:
             from docx.shared import RGBColor
+
             # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
             if len(color) == 6:
                 r = int(color[0:2], 16)
@@ -224,9 +241,11 @@ class DocxRenderer:
                     run.font.name = font_name
                 if font_size:
                     from docx.shared import Pt
+
                     run.font.size = Pt(font_size)
                 if color:
                     from docx.shared import RGBColor
+
                     # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                     if len(color) == 6:
                         r = int(color[0:2], 16)
@@ -261,7 +280,9 @@ class DocxRenderer:
         table_params = block.get("params", {})
         header_font_name = table_params.get("header_font_name", None)
         header_font_size = table_params.get("header_font_size", None)
-        header_bold = table_params.get("header_bold", True)  # по умолчанию заголовки жирные
+        header_bold = table_params.get(
+            "header_bold", True
+        )  # по умолчанию заголовки жирные
         header_italic = table_params.get("header_italic", False)
         header_color = table_params.get("header_color", None)
         body_font_name = table_params.get("body_font_name", None)
@@ -284,12 +305,24 @@ class DocxRenderer:
             hdr_cells[i].text = cleaned_header
 
             # Применяем стили к заголовкам
-            if header_font_name or header_font_size or header_bold or header_italic or header_color:
-                run = hdr_cells[i].paragraphs[0].runs[0] if hdr_cells[i].paragraphs and hdr_cells[i].paragraphs[0].runs else hdr_cells[i].paragraphs[0].add_run(cleaned_header)
+            if (
+                header_font_name
+                or header_font_size
+                or header_bold
+                or header_italic
+                or header_color
+            ):
+                run = (
+                    hdr_cells[i].paragraphs[0].runs[0]
+                    if hdr_cells[i].paragraphs
+                    and hdr_cells[i].paragraphs[0].runs
+                    else hdr_cells[i].paragraphs[0].add_run(cleaned_header)
+                )
                 if header_font_name:
                     run.font.name = header_font_name
                 if header_font_size:
                     from docx.shared import Pt
+
                     run.font.size = Pt(header_font_size)
                 if header_bold is not None:
                     run.font.bold = header_bold
@@ -297,6 +330,7 @@ class DocxRenderer:
                     run.font.italic = header_italic
                 if header_color:
                     from docx.shared import RGBColor
+
                     # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                     if len(header_color) == 6:
                         r = int(header_color[0:2], 16)
@@ -312,12 +346,23 @@ class DocxRenderer:
                 cells[i].text = cleaned_value
 
                 # Применяем стили к ячейкам данных
-                if body_font_name or body_font_size or body_bold or body_italic or body_color:
-                    run = cells[i].paragraphs[0].runs[0] if cells[i].paragraphs and cells[i].paragraphs[0].runs else cells[i].paragraphs[0].add_run(cleaned_value)
+                if (
+                    body_font_name
+                    or body_font_size
+                    or body_bold
+                    or body_italic
+                    or body_color
+                ):
+                    run = (
+                        cells[i].paragraphs[0].runs[0]
+                        if cells[i].paragraphs and cells[i].paragraphs[0].runs
+                        else cells[i].paragraphs[0].add_run(cleaned_value)
+                    )
                     if body_font_name:
                         run.font.name = body_font_name
                     if body_font_size:
                         from docx.shared import Pt
+
                         run.font.size = Pt(body_font_size)
                     if body_bold is not None:
                         run.font.bold = body_bold
@@ -325,6 +370,7 @@ class DocxRenderer:
                         run.font.italic = body_italic
                     if body_color:
                         from docx.shared import RGBColor
+
                         # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                         if len(body_color) == 6:
                             r = int(body_color[0:2], 16)
@@ -373,9 +419,7 @@ class DocxRenderer:
 
             # Сохраняем в байтовый поток
             img_buffer = io.BytesIO()
-            plt.savefig(
-                img_buffer, format="png", bbox_inches="tight", dpi=150
-            )
+            plt.savefig(img_buffer, format="png", bbox_inches="tight", dpi=150)
             img_buffer.seek(0)
 
             # Добавляем изображение в документ
@@ -413,6 +457,7 @@ class DocxRenderer:
                     caption_run.font.name = font_name
                 if caption_font_size:
                     from docx.shared import Pt
+
                     caption_run.font.size = Pt(caption_font_size)
                 if bold:
                     caption_run.font.bold = bold
@@ -420,6 +465,7 @@ class DocxRenderer:
                     caption_run.font.italic = italic
                 if color:
                     from docx.shared import RGBColor
+
                     # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                     if len(color) == 6:
                         r = int(color[0:2], 16)
@@ -447,6 +493,7 @@ class DocxRenderer:
                 run.font.name = font_name
             if math_font_size:
                 from docx.shared import Pt
+
                 run.font.size = Pt(math_font_size)
             if bold:
                 run.font.bold = bold
@@ -454,6 +501,7 @@ class DocxRenderer:
                 run.font.italic = italic
             if color:
                 from docx.shared import RGBColor
+
                 # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                 if len(color) == 6:
                     r = int(color[0:2], 16)
@@ -481,6 +529,7 @@ class DocxRenderer:
                     caption_run.font.name = font_name
                 if caption_font_size:
                     from docx.shared import Pt
+
                     caption_run.font.size = Pt(caption_font_size)
                 if bold:
                     caption_run.font.bold = bold
@@ -488,6 +537,7 @@ class DocxRenderer:
                     caption_run.font.italic = italic
                 if color:
                     from docx.shared import RGBColor
+
                     # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
                     if len(color) == 6:
                         r = int(color[0:2], 16)
@@ -548,12 +598,12 @@ async def send_docx_response(
 
         # Удаляем маркеры кода, если они есть
         cleaned_reply = reply.strip()
-        if cleaned_reply.startswith('```json'):
+        if cleaned_reply.startswith("```json"):
             cleaned_reply = cleaned_reply[7:]  # Удаляем '```json'
-        elif cleaned_reply.startswith('```'):
-            cleaned_reply = cleaned_reply[3:]   # Удаляем '```'
+        elif cleaned_reply.startswith("```"):
+            cleaned_reply = cleaned_reply[3:]  # Удаляем '```'
 
-        if cleaned_reply.endswith('```'):
+        if cleaned_reply.endswith("```"):
             cleaned_reply = cleaned_reply[:-3]  # Удаляем закрывающий '```'
 
         cleaned_reply = cleaned_reply.strip()

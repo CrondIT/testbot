@@ -80,16 +80,21 @@ def register_cyrillic_font():
         else:
             # Для других систем можно использовать другие шрифты
             font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-            bold_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"  # Жирный DejaVu
+            bold_font_path = (
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            )
 
         # Регистрируем обычный шрифт
         pdfmetrics.registerFont(TTFont("CyrillicFont", font_path))
 
         # Попробуем зарегистрировать жирное начертание
         try:
-            pdfmetrics.registerFont(TTFont("CyrillicFont-Bold", bold_font_path))
+            pdfmetrics.registerFont(
+                TTFont("CyrillicFont-Bold", bold_font_path)
+            )
         except (IOError, OSError):
-            # Если не удалось загрузить жирный шрифт, регистрируем обычный как жирный
+            # Если не удалось загрузить жирный шрифт,
+            #  регистрируем обычный как жирный
             pdfmetrics.registerFont(TTFont("CyrillicFont-Bold", font_path))
 
         return "CyrillicFont"
@@ -142,6 +147,34 @@ CYRILLIC_FONT = register_cyrillic_font()
 
 # Убедимся, что мы используем правильные имена шрифтов
 CYRILLIC_FONT_BOLD = "CyrillicFont-Bold"
+
+
+def normalize_font_name(font_name):
+    """
+    Нормализует имя шрифта, заменяя недопустимые шрифты на зарегистрированные
+
+    Args:
+        font_name (str): Имя шрифта из JSON
+
+    Returns:
+        str: Нормализованное имя шрифта
+    """
+    if not font_name:
+        return CYRILLIC_FONT
+
+    # Приводим к нижнему регистру и удаляем пробелы для сравнения
+    normalized = font_name.lower().replace(" ", "").replace("-", "")
+
+    # Проверяем, является ли шрифт Times New Roman или его вариантом
+    if "times" in normalized or "newroman" in normalized:
+        return CYRILLIC_FONT
+
+    # Если это один из зарегистрированных шрифтов, возвращаем как есть
+    if font_name in ["CyrillicFont", "CyrillicFont-Bold", "Helvetica"]:
+        return font_name
+
+    # В остальных случаях используем кириллический шрифт по умолчанию
+    return CYRILLIC_FONT
 
 
 def create_pdf_from_json(data: dict) -> io.BytesIO:
@@ -205,6 +238,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             text = block.get("text", "")
             # Используем параметры из JSON, если они есть, иначе - стандартные
             font_name = block.get("font_name", CYRILLIC_FONT)
+            font_name = normalize_font_name(
+                font_name
+            )  # Нормализуем имя шрифта
             font_size = block.get(
                 "font_size", 16 if level == 1 else 14 if level == 2 else 12
             )
@@ -237,6 +273,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             text = block.get("text", "")
             # Используем параметры из JSON, если они есть, иначе - стандартные
             font_name = block.get("font_name", CYRILLIC_FONT)
+            font_name = normalize_font_name(
+                font_name
+            )  # Нормализуем имя шрифта
             font_size = block.get("font_size", 12)
             left_indent = block.get("left_indent", 0)
             right_indent = block.get("right_indent", 0)
@@ -278,6 +317,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             items = block.get("items", [])
             # Используем параметры из JSON, если они есть, иначе - стандартные
             font_name = block.get("font_name", CYRILLIC_FONT)
+            font_name = normalize_font_name(
+                font_name
+            )  # Нормализуем имя шрифта
             font_size = block.get("font_size", 12)
             left_indent = block.get("left_indent", 0)
             right_indent = block.get("right_indent", 0)
@@ -310,14 +352,18 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             header_font_name = table_params.get(
                 "header_font_name", "CyrillicFont-Bold"
             )
+            header_font_name = normalize_font_name(
+                header_font_name
+            )  # Нормализуем имя шрифта
             header_font_size = table_params.get("header_font_size", 10)
             body_font_name = table_params.get("body_font_name", CYRILLIC_FONT)
+            body_font_name = normalize_font_name(
+                body_font_name
+            )  # Нормализуем имя шрифта
             body_font_size = table_params.get("body_font_size", 9)
             grid_width = table_params.get("grid_width", 0.5)
             grid_color = table_params.get("grid_color", colors.black)
-            header_bg_color = table_params.get(
-                "header_bg_color", colors.green
-            )  # Зеленый фон для заголовков
+            header_bg_color = table_params.get("header_bg_color", colors.gray)
             header_text_color = table_params.get(
                 "header_text_color", colors.whitesmoke
             )
@@ -502,6 +548,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
 
             # Используем параметры из JSON, если они есть, иначе - стандартные
             font_name = block.get("font_name", CYRILLIC_FONT)
+            font_name = normalize_font_name(
+                font_name
+            )  # Нормализуем имя шрифта
             font_size = block.get("font_size", 12)
             math_font_size = block.get("math_font_size", 12)
             caption_font_size = block.get("caption_font_size", 10)
