@@ -767,7 +767,7 @@ async def handle_chat_mode(
             user_message
         )
         if wants_word_format:
-            user_message = user_message + docx_utils.JSON_SCHEMA
+            user_message = user_message + " " + docx_utils.JSON_SCHEMA
 
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message

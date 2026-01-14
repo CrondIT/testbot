@@ -6,8 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
 import io
 
-JSON_SCHEMA = {
-    """
+JSON_SCHEMA = """
     Верни ТОЛЬКО валидный JSON без пояснений.
     Строгая схема:
     {
@@ -24,7 +23,6 @@ JSON_SCHEMA = {
     ]
     }
     """
-}
 
 
 class DocxRenderer:
