@@ -6,6 +6,26 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
 import io
 
+JSON_SCHEMA = {
+    """
+    Верни ТОЛЬКО валидный JSON без пояснений.
+    Строгая схема:
+    {
+    "meta": {"title": "string"},
+    "blocks": [
+        {"type":"heading","level":1,"text":"string"},
+        {"type":"paragraph","text":"string"},
+        {"type":"list", "ordered":false,
+            "items":["item1", "item2"]
+        },
+        {"type":"table", "headers":["column1", "column2"],
+           "rows":[["value1", "value2"], ["value3", "value4"]]
+        }
+    ]
+    }
+    """
+}
+
 
 class DocxRenderer:
     def __init__(self):
@@ -91,8 +111,7 @@ class DocxRenderer:
 
         table = self.doc.add_table(rows=1, cols=len(headers))
         table.style = "Table Grid"  # красивый стиль с границами
-
-        # Заголовки
+    # Заголовки
         hdr_cells = table.rows[0].cells
         for i, header in enumerate(headers):
             hdr_cells[i].text = str(header)
@@ -102,7 +121,7 @@ class DocxRenderer:
             cells = table.add_row().cells
             for i, value in enumerate(row):
                 cells[i].text = str(value)
-                
+
 
 def create_formatted_docx(text_content, formatting_instructions=None):
     """
