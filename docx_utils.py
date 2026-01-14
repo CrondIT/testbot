@@ -1,10 +1,53 @@
 """Utility functions for creating and handling DOCX files."""
 
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches
+# from docx.oxml.shared import OxmlElement
 import io
+import json
+from telegram import InputFile
+from telegram.helpers import escape_markdown
+import matplotlib
+import matplotlib.pyplot as plt
+# from pylatexenc.latex2text import LatexNodes2Text
+# from latex2mathml.converter import convert
+
+
+def clean_html_tags(text):
+    """
+    Очищает текст от HTML-тегов и других форматирований,
+    не поддерживаемых в python-docx.
+
+    Args:
+        text (str): Текст для очистки
+
+    Returns:
+        str: Очищенный текст
+    """
+    if not isinstance(text, str):
+        return str(text)
+
+    # Удаляем span теги и их атрибуты
+    text = re.sub(r'<span[^>]*>', '', text)
+    text = re.sub(r'</span>', '', text)
+
+    # Удаляем другие теги
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Удаляем двойные звездочки (жирный текст в markdown)
+    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)
+
+    # Удаляем одинарные звездочки (курсив в markdown)
+    text = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\1', text)
+
+    # Удаляем подчеркивания (курсив в markdown)
+    text = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'\1', text)
+
+    return text.strip()
+
+matplotlib.use("Agg")  # Use non-interactive backend
 
 JSON_SCHEMA = """
     Верни ТОЛЬКО валидный JSON без пояснений.
@@ -12,14 +55,29 @@ JSON_SCHEMA = """
     {
     "meta": {"title": "string"},
     "blocks": [
-        {"type":"heading","level":1,"text":"string"},
-        {"type":"paragraph","text":"string"},
-        {"type":"list", "ordered":false,
+        {"type":"heading","level":1,"text":"string", "font_name":"string", "font_size":12, "color":"string", "bold":false, "italic":false},
+        {"type":"paragraph","text":"string", "font_name":"string", "font_size":12, "left_indent":0, "right_indent":0, "space_after":12, "alignment":"left", "color":"string", "bold":false, "italic":false, "underline":false},
+        {"type":"list", "ordered":false, "font_name":"string", "font_size":12, "left_indent":0, "right_indent":0, "space_after":12, "alignment":"left", "color":"string", "bold":false, "italic":false,
             "items":["item1", "item2"]
         },
         {"type":"table", "headers":["column1", "column2"],
-           "rows":[["value1", "value2"], ["value3", "value4"]]
-        }
+           "rows":[["value1", "value2"], ["value3", "value4"]],
+           "params": {
+               "header_font_name":"string",
+               "header_font_size":12,
+               "header_bold":true,
+               "header_italic":false,
+               "header_color":"string",
+               "body_font_name":"string",
+               "body_font_size":12,
+               "body_bold":false,
+               "body_italic":false,
+               "body_color":"string",
+               "table_style":"Table Grid",
+               "header_bg_color":"string"
+           }
+        },
+        {"type":"math", "formula":"LaTeX formula", "caption":"optional caption", "font_name":"string", "font_size":12, "math_font_size":12, "caption_font_size":10, "bold":false, "italic":true, "alignment":"left", "color":"string"}
     ]
     }
     """
@@ -59,35 +117,130 @@ class DocxRenderer:
             self._list(block)
         elif block_type == "table":
             self._table(block)
+        elif block_type == "math":
+            self._math(block)
         else:
             raise ValueError(f"Unknown block type: {block_type}")
 
     def _heading(self, block: dict):
         level = block.get("level", 1)
         text = block.get("text", "")
-        self.doc.add_heading(text, level=level)
+        # Используем параметры из JSON, если они есть, иначе - стандартные
+        font_name = block.get("font_name", None)
+        font_size = block.get("font_size", None)
+        bold = block.get("bold", None)
+        italic = block.get("italic", None)
+        color = block.get("color", None)
+
+        heading = self.doc.add_heading(text, level=level)
+
+        # Применяем стили, если они указаны в JSON
+        if font_name or font_size or bold is not None or italic is not None:
+            run = heading.runs[0] if heading.runs else heading.add_run(text)
+            if font_name:
+                run.font.name = font_name
+            if font_size:
+                from docx.shared import Pt
+                run.font.size = Pt(font_size)
+            if bold is not None:
+                run.font.bold = bold
+            if italic is not None:
+                run.font.italic = italic
+            if color:
+                # Для цвета нужно импортировать RGBColor
+                from docx.shared import RGBColor
+                # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                if len(color) == 6:
+                    r = int(color[0:2], 16)
+                    g = int(color[2:4], 16)
+                    b = int(color[4:6], 16)
+                    run.font.color.rgb = RGBColor(r, g, b)
 
     def _paragraph(self, block: dict):
-        p = self.doc.add_paragraph()
-        run = p.add_run(block.get("text", ""))
+        # Используем параметры из JSON, если они есть, иначе - стандартные
+        text = clean_html_tags(block.get("text", ""))
+        font_name = block.get("font_name", None)
+        font_size = block.get("font_size", None)
+        left_indent = block.get("left_indent", None)
+        right_indent = block.get("right_indent", None)
+        space_after = block.get("space_after", None)
+        alignment = block.get("alignment", None)  # left, center, right
+        color = block.get("color", None)
 
+        p = self.doc.add_paragraph()
+        run = p.add_run(text)
+
+        # Применяем форматирование из JSON
         if block.get("bold"):
             run.bold = True
         if block.get("italic"):
             run.italic = True
+        if block.get("underline"):
+            run.underline = True
+        if font_name:
+            run.font.name = font_name
+        if font_size:
+            from docx.shared import Pt
+            run.font.size = Pt(font_size)
+        if color:
+            from docx.shared import RGBColor
+            # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+            if len(color) == 6:
+                r = int(color[0:2], 16)
+                g = int(color[2:4], 16)
+                b = int(color[4:6], 16)
+                run.font.color.rgb = RGBColor(r, g, b)
 
-        align = block.get("align")
-        if align == "center":
+        # Выравнивание
+        if alignment == "center":
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        elif align == "right":
+        elif alignment == "right":
             p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        elif alignment == "justify":
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        # left - по умолчанию
 
     def _list(self, block: dict):
+        # Используем параметры из JSON, если они есть, иначе - стандартные
         ordered = block.get("ordered", False)
+        font_name = block.get("font_name", None)
+        font_size = block.get("font_size", None)
+        left_indent = block.get("left_indent", None)
+        right_indent = block.get("right_indent", None)
+        space_after = block.get("space_after", None)
+        alignment = block.get("alignment", "left")  # left, center, right
+        color = block.get("color", None)
+
         style = "List Number" if ordered else "List Bullet"
 
         for item in block.get("items", []):
-            self.doc.add_paragraph(item, style=style)
+            cleaned_item = clean_html_tags(item)
+            p = self.doc.add_paragraph(cleaned_item, style=style)
+
+            # Применяем стили, если они указаны в JSON
+            if p.runs:
+                run = p.runs[0]
+                if font_name:
+                    run.font.name = font_name
+                if font_size:
+                    from docx.shared import Pt
+                    run.font.size = Pt(font_size)
+                if color:
+                    from docx.shared import RGBColor
+                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                    if len(color) == 6:
+                        r = int(color[0:2], 16)
+                        g = int(color[2:4], 16)
+                        b = int(color[4:6], 16)
+                        run.font.color.rgb = RGBColor(r, g, b)
+
+            # Выравнивание
+            if alignment == "center":
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif alignment == "right":
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif alignment == "justify":
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
     def _table(self, block: dict):
         """
@@ -104,139 +257,247 @@ class DocxRenderer:
         headers = block.get("headers", [])
         rows = block.get("rows", [])
 
+        # Используем параметры из JSON, если они есть, иначе - стандартные
+        table_params = block.get("params", {})
+        header_font_name = table_params.get("header_font_name", None)
+        header_font_size = table_params.get("header_font_size", None)
+        header_bold = table_params.get("header_bold", True)  # по умолчанию заголовки жирные
+        header_italic = table_params.get("header_italic", False)
+        header_color = table_params.get("header_color", None)
+        body_font_name = table_params.get("body_font_name", None)
+        body_font_size = table_params.get("body_font_size", None)
+        body_bold = table_params.get("body_bold", False)
+        body_italic = table_params.get("body_italic", False)
+        body_color = table_params.get("body_color", None)
+        table_style = table_params.get("table_style", "Table Grid")
+        header_bg_color = table_params.get("header_bg_color", None)
+
         if not headers or not rows:
             return  # Пустая таблица — ничего не делаем
 
         table = self.doc.add_table(rows=1, cols=len(headers))
-        table.style = "Table Grid"  # красивый стиль с границами
-    # Заголовки
+        table.style = table_style  # стиль таблицы из JSON
+        # Заголовки
         hdr_cells = table.rows[0].cells
         for i, header in enumerate(headers):
-            hdr_cells[i].text = str(header)
+            cleaned_header = clean_html_tags(str(header))
+            hdr_cells[i].text = cleaned_header
+
+            # Применяем стили к заголовкам
+            if header_font_name or header_font_size or header_bold or header_italic or header_color:
+                run = hdr_cells[i].paragraphs[0].runs[0] if hdr_cells[i].paragraphs and hdr_cells[i].paragraphs[0].runs else hdr_cells[i].paragraphs[0].add_run(cleaned_header)
+                if header_font_name:
+                    run.font.name = header_font_name
+                if header_font_size:
+                    from docx.shared import Pt
+                    run.font.size = Pt(header_font_size)
+                if header_bold is not None:
+                    run.font.bold = header_bold
+                if header_italic is not None:
+                    run.font.italic = header_italic
+                if header_color:
+                    from docx.shared import RGBColor
+                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                    if len(header_color) == 6:
+                        r = int(header_color[0:2], 16)
+                        g = int(header_color[2:4], 16)
+                        b = int(header_color[4:6], 16)
+                        run.font.color.rgb = RGBColor(r, g, b)
 
         # Данные
         for row in rows:
             cells = table.add_row().cells
             for i, value in enumerate(row):
-                cells[i].text = str(value)
+                cleaned_value = clean_html_tags(str(value))
+                cells[i].text = cleaned_value
 
+                # Применяем стили к ячейкам данных
+                if body_font_name or body_font_size or body_bold or body_italic or body_color:
+                    run = cells[i].paragraphs[0].runs[0] if cells[i].paragraphs and cells[i].paragraphs[0].runs else cells[i].paragraphs[0].add_run(cleaned_value)
+                    if body_font_name:
+                        run.font.name = body_font_name
+                    if body_font_size:
+                        from docx.shared import Pt
+                        run.font.size = Pt(body_font_size)
+                    if body_bold is not None:
+                        run.font.bold = body_bold
+                    if body_italic is not None:
+                        run.font.italic = body_italic
+                    if body_color:
+                        from docx.shared import RGBColor
+                        # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                        if len(body_color) == 6:
+                            r = int(body_color[0:2], 16)
+                            g = int(body_color[2:4], 16)
+                            b = int(body_color[4:6], 16)
+                            run.font.color.rgb = RGBColor(r, g, b)
 
-def create_formatted_docx(text_content, formatting_instructions=None):
-    """
-    Create a formatted DOCX document from text content
-    based on formatting instructions.
-    Args:
-        text_content (str): The content to format
-        formatting_instructions (dict): 
-        Instructions for formatting the document
-    Returns:
-        io.BytesIO: The DOCX file as bytes
-    """
-    doc = Document()
-    # Apply basic formatting if no specific instructions provided
-    if not formatting_instructions:
-        formatting_instructions = {
-            "title": True,
-            "headings": True,
-            "paragraph_spacing": True,
-            "font_size": 12,
+    def _math(self, block: dict):
+        """
+        Рендерим математическую формулу.
+        JSON-схема:
+        {
+            "type": "math",
+            "formula": "LaTeX formula",
+            "caption": "optional caption"
         }
-    # Process the text content to identify different elements
-    lines = text_content.split("\n")
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Check if line looks like a heading (starts with # or is in all caps)
-        if line.startswith("#"):
-            # Markdown-style heading
-            level = len(line) - len(line.lstrip("#"))
-            heading_text = line.lstrip("# ").strip()
-            doc.add_heading(heading_text, level=min(level, 9))
-        elif line.isupper() and len(line) < 100:
-            # All caps line likely a heading
-            doc.add_heading(line, level=1)
-        else:
-            # Regular paragraph
-            paragraph = doc.add_paragraph()
-            run = paragraph.add_run(line)
-            run.font.size = Pt(formatting_instructions.get("font_size", 12))
-            # Apply additional formatting based on instructions
-            if formatting_instructions.get("bold_first_line", False):
-                run.bold = True
-    # Apply general document formatting
-    apply_general_formatting(doc, formatting_instructions)
-    # Save to BytesIO object
-    doc_io = io.BytesIO()
-    doc.save(doc_io)
-    doc_io.seek(0)
-    return doc_io
+        """
+        formula = block.get("formula", "")
+        caption = block.get("caption", "")
 
+        # Используем параметры из JSON, если они есть, иначе - стандартные
+        font_name = block.get("font_name", None)
+        font_size = block.get("font_size", None)
+        math_font_size = block.get("math_font_size", 12)
+        caption_font_size = block.get("caption_font_size", 10)
+        bold = block.get("bold", False)
+        italic = block.get("italic", True)  # По умолчанию курсив для формул
+        alignment = block.get("alignment", "left")  # left, center, right
+        color = block.get("color", None)
 
-def apply_general_formatting(doc, formatting_instructions):
-    """Apply general formatting to the document."""
-    # Set page margins
-    section = doc.sections[0]
-    section.top_margin = Inches(1)
-    section.bottom_margin = Inches(1)
-    section.left_margin = Inches(1)
-    section.right_margin = Inches(1)
-    # Apply paragraph spacing if requested
-    if formatting_instructions.get("paragraph_spacing", False):
-        for paragraph in doc.paragraphs:
-            paragraph.space_after = Pt(6)
+        # Создаем изображение с формулой с помощью matplotlib
+        # Это более надежный способ отображения сложных формул в Word
+        try:
+            # Настройка фигуры matplotlib
+            fig, ax = plt.subplots(figsize=(8, 2))
+            ax.text(
+                0.5,
+                0.5,
+                f"${formula}$",
+                fontsize=16,
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            ax.axis("off")  # Скрыть оси
 
-    # Apply line spacing if requested
-    line_spacing = formatting_instructions.get("line_spacing", 1.0)
-    for paragraph in doc.paragraphs:
-        paragraph.line_spacing = line_spacing
+            # Сохраняем в байтовый поток
+            img_buffer = io.BytesIO()
+            plt.savefig(
+                img_buffer, format="png", bbox_inches="tight", dpi=150
+            )
+            img_buffer.seek(0)
 
+            # Добавляем изображение в документ
+            paragraph = self.doc.add_paragraph()
 
-def parse_formatting_request(user_request):
-    """
-    Parse user's formatting request to extract formatting preferences.
+            # Применяем выравнивание
+            if alignment == "center":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif alignment == "right":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif alignment == "justify":
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-    Args:
-        user_request (str): User's request that 
-        may contain formatting instructions
-    Returns:
-        dict: Parsed formatting instructions
-    """
-    formatting_instructions = {}
-    # Look for font size requests
-    font_size_match = re.search(
-        r"(\d+)\s*(?:pt|point|points|размер)", user_request, re.IGNORECASE
-    )
-    if font_size_match:
-        formatting_instructions["font_size"] = int(font_size_match.group(1))
-    # Look for line spacing requests
-    line_spacing_match = re.search(
-        r"(?:line|spacing|между строками)\s*(\d+\.?\d*)",
-        user_request,
-        re.IGNORECASE,
-    )
-    if line_spacing_match:
-        formatting_instructions["line_spacing"] = float(
-            line_spacing_match.group(1)
-        )
-    # Look for bold first line requests
-    if re.search(
-        r"(?:жирный|bold|выделить)\s+(?:первую|first)",
-        user_request,
-        re.IGNORECASE,
-    ):
-        formatting_instructions["bold_first_line"] = True
-    # Look for paragraph spacing requests
-    if re.search(
-        r"(?:spacing|между абзацами|абзац)", user_request, re.IGNORECASE
-    ):
-        formatting_instructions["paragraph_spacing"] = True
-    # Look for heading requests
-    if re.search(
-        r"(?:заголовки|headings|titles)", user_request, re.IGNORECASE
-    ):
-        formatting_instructions["headings"] = True
-    return formatting_instructions
+            run = paragraph.add_run()
+
+            # Добавляем изображение в документ
+            run.add_picture(img_buffer, width=Inches(6))
+
+            # Если есть подпись, добавляем её
+            if caption:
+                caption_p = self.doc.add_paragraph()
+
+                # Применяем выравнивание к подписи
+                if alignment == "center":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif alignment == "right":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif alignment == "justify":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+                caption_run = caption_p.add_run(f"{caption}")
+
+                # Применяем стили к подписи
+                if font_name:
+                    caption_run.font.name = font_name
+                if caption_font_size:
+                    from docx.shared import Pt
+                    caption_run.font.size = Pt(caption_font_size)
+                if bold:
+                    caption_run.font.bold = bold
+                if italic:
+                    caption_run.font.italic = italic
+                if color:
+                    from docx.shared import RGBColor
+                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                    if len(color) == 6:
+                        r = int(color[0:2], 16)
+                        g = int(color[2:4], 16)
+                        b = int(color[4:6], 16)
+                        caption_run.font.color.rgb = RGBColor(r, g, b)
+
+        except Exception as e:
+            # Если не удалось создать изображение формулы,
+            # добавляем как обычный текст
+            p = self.doc.add_paragraph()
+
+            # Применяем выравнивание
+            if alignment == "center":
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            elif alignment == "right":
+                p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            elif alignment == "justify":
+                p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+            run = p.add_run(f"Формула: {formula}")
+
+            # Применяем стили к формуле
+            if font_name:
+                run.font.name = font_name
+            if math_font_size:
+                from docx.shared import Pt
+                run.font.size = Pt(math_font_size)
+            if bold:
+                run.font.bold = bold
+            if italic:
+                run.font.italic = italic
+            if color:
+                from docx.shared import RGBColor
+                # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                if len(color) == 6:
+                    r = int(color[0:2], 16)
+                    g = int(color[2:4], 16)
+                    b = int(color[4:6], 16)
+                    run.font.color.rgb = RGBColor(r, g, b)
+
+            print(f"Ошибка при рендеринге формулы: {e}")
+
+            if caption:
+                caption_p = self.doc.add_paragraph()
+
+                # Применяем выравнивание к подписи
+                if alignment == "center":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif alignment == "right":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif alignment == "justify":
+                    caption_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+                caption_run = caption_p.add_run(f"({caption})")
+
+                # Применяем стили к подписи
+                if font_name:
+                    caption_run.font.name = font_name
+                if caption_font_size:
+                    from docx.shared import Pt
+                    caption_run.font.size = Pt(caption_font_size)
+                if bold:
+                    caption_run.font.bold = bold
+                if italic:
+                    caption_run.font.italic = italic
+                if color:
+                    from docx.shared import RGBColor
+                    # Предполагаем, что цвет в формате "RRGGBB" или "RGB"
+                    if len(color) == 6:
+                        r = int(color[0:2], 16)
+                        g = int(color[2:4], 16)
+                        b = int(color[4:6], 16)
+                        caption_run.font.color.rgb = RGBColor(r, g, b)
+
+        finally:
+            # Очищаем matplotlib
+            plt.close()
 
 
 def check_user_wants_word_format(user_message):
@@ -269,37 +530,69 @@ def check_user_wants_word_format(user_message):
     )
 
 
-def clean_content_for_docx(content):
+async def send_docx_response(
+    update,
+    reply,
+    image_url=None,
+):
     """
-    Clean content by removing markdown formatting and unnecessary mentions
-    of DOCX formatting capabilities.
-
+    Отправляет DOCX-файл с ответом пользователю.
     Args:
-        content (str): The content to clean
-
-    Returns:
-        str: Cleaned content without markdown formatting
+        update: Объект обновления Telegram
+        reply: Ответ от модели, который будет преобразован в DOCX
     """
-    import re
+    try:
+        # Проверяем, что reply не пустой
+        if not reply or reply.strip() == "":
+            raise ValueError("Пустой ответ от модели")
 
-    # Remove bold markers (**)
-    cleaned = re.sub(r'\*\*(.*?)\*\*', r'\1', content)
+        # Удаляем маркеры кода, если они есть
+        cleaned_reply = reply.strip()
+        if cleaned_reply.startswith('```json'):
+            cleaned_reply = cleaned_reply[7:]  # Удаляем '```json'
+        elif cleaned_reply.startswith('```'):
+            cleaned_reply = cleaned_reply[3:]   # Удаляем '```'
 
-    # Remove italic markers (* or _)
-    cleaned = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\1', cleaned)
-    cleaned = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'\1', cleaned)
+        if cleaned_reply.endswith('```'):
+            cleaned_reply = cleaned_reply[:-3]  # Удаляем закрывающий '```'
 
-    # Remove unnecessary mentions about DOCX formatting
-    cleaned = re.sub(r'Если хотите, могу оформить это как \*\*готовый \.DOCX\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'Могу оформить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'Я могу предоставить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'Вот ваш текст в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'При необходимости могу оформить это как \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'Могу подготовить это в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'Могу оформить в формате \*\*Word \.docx\*\*\.?', '', cleaned, flags=re.IGNORECASE)
+        cleaned_reply = cleaned_reply.strip()
 
-    # Remove extra whitespace that might result from removals
-    cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
-    cleaned = cleaned.strip()
+        data = json.loads(cleaned_reply)
+        doc_io = io.BytesIO()
+        renderer = DocxRenderer()
+        renderer.render(data, doc_io)
+        doc_io.seek(0)
 
-    return cleaned
+        await update.message.reply_document(
+            document=InputFile(doc_io, filename="document.docx"),
+            caption="Ваш ответ в формате Word",
+        )
+        if image_url:
+            await update.message.reply_photo(
+                image_url,
+                caption="Вот что сгенерировано по Вашему запросу",
+            )
+    except json.JSONDecodeError as e:
+        # Если ответ не является валидным JSON,
+        # отправляем обычное сообщение
+        from message_utils import send_long_message
+
+        safe_reply = escape_markdown(reply, version=2)
+        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
+        print(f"Ошибка разбора JSON при создании DOCX: {e}")
+    except ValueError as e:
+        # Если возникла ошибка значения (например, пустой ответ)
+        from message_utils import send_long_message
+
+        safe_reply = escape_markdown(reply, version=2)
+        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
+        print(f"Ошибка значения при создании DOCX: {e}")
+    except Exception as e:
+        # Если не удалось создать или отправить
+        # DOCX, отправляем обычное сообщение
+        from message_utils import send_long_message
+
+        safe_reply = escape_markdown(reply, version=2)
+        await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
+        print(f"Ошибка при создании или отправке DOCX файла: {e}")

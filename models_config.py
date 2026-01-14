@@ -138,10 +138,9 @@ async def ask_gpt51_with_web_search(
         )
     try:
         response = client_chat.responses.create(
-            model="gpt-5.2",
+            model=MODELS["chat"],
             input=context_history,
             tools=tools,
-            temperature=0.4,
             timeout=60,
         )
 

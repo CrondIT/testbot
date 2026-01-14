@@ -10,6 +10,7 @@ import billing_utils
 import models_config
 import docx_utils
 import image_utils
+import pdf_utils
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
@@ -22,6 +23,9 @@ from global_state import (
 )
 import json
 from telegram import InputFile
+from message_utils import send_long_message
+from pdf_utils import send_pdf_response
+from docx_utils import send_docx_response
 
 
 def initialize_user_context(user_id: int, current_mode: str):
@@ -38,7 +42,7 @@ def initialize_user_context(user_id: int, current_mode: str):
         ]
 
 
-async def handle_edit_mode(
+async def handle_image_edit_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
@@ -137,8 +141,7 @@ async def handle_edit_mode(
                             await update.message.reply_photo(
                                 photo,
                                 caption=(
-                                    f"Отредактировано"
-                                    f" по запросу: {user_message}"
+                                    f"Отредактировано по запросу: {user_message}"
                                 ),
                             )
                         print(
@@ -196,7 +199,7 @@ async def handle_edit_mode(
     )
 
 
-async def handle_ai_file_mode(
+async def handle_file_analysis_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
@@ -206,6 +209,19 @@ async def handle_ai_file_mode(
 ):
     """Handle the ai_file mode functionality separately"""
     from billing_utils import spend_coins
+
+    wants_word_format = docx_utils.check_user_wants_word_format(
+        user_message
+    )
+    # Проверяем, хочет ли пользователь получить ответ в формате PDF
+    wants_pdf_format = pdf_utils.check_user_wants_pdf_format(
+        user_message
+    )
+
+    if wants_word_format:
+        user_message = user_message + " " + docx_utils.JSON_SCHEMA
+    elif wants_pdf_format:
+        user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
 
     # Check if the message contains a document
     if update.message.document:
@@ -508,51 +524,54 @@ async def handle_ai_file_mode(
                 {"role": "assistant", "content": reply}
             )
 
-            # Проверяем, хочет ли пользователь получить ответ в формате Word
-            wants_word_format = docx_utils.check_user_wants_word_format(
-                user_message
-            )
-
             if wants_word_format:
                 # Создаем DOCX файл с ответом
+                await send_docx_response(update, reply)
+            elif wants_pdf_format:
+                # Создаем PDF файл с ответом
+                await send_pdf_response(update, reply)
+            else:
+                # Проверяем, является ли ответ валидным JSON с подходящей структурой
+                # для форматов DOCX/PDF
+                import json
                 try:
-                    # Парсим запрос пользователя на предмет форматирования
-                    formatting_instructions = (
-                        docx_utils.parse_formatting_request(user_message)
-                    )
-
-                    # Очищаем содержимое от форматирования и упоминаний о DOCX
-                    clean_reply = docx_utils.clean_content_for_docx(reply)
-
-                    # Создаем DOCX файл
-                    docx_file = docx_utils.create_formatted_docx(
-                        clean_reply, formatting_instructions
-                    )
-                    # Убедимся, что указатель находится в начале файла
-                    docx_file.seek(0)
-
-                    # Отправляем DOCX файл пользователю
-                    await update.message.reply_document(
-                        document=docx_file,
-                        filename="document.docx",
-                        caption="Ваш ответ в формате Word (DOCX)",
-                    )
-                except Exception as e:
-                    # Если не удалось создать или отправить DOCX,
-                    # отправляем обычное сообщение
+                    parsed_reply = json.loads(reply)
+                    # Проверяем наличие обязательных полей для форматов
+                    if isinstance(parsed_reply, dict) and (
+                        "meta" in parsed_reply or "blocks" in parsed_reply
+                    ):
+                        # Ответ имеет структуру, подходящую для DOCX/PDF
+                        # Предлагаем пользователю выбрать формат
+                        await update.message.reply_text(
+                            "Я подготовил структурированный ответ. "
+                            "В каком формате вы хотите получить результат?\n"
+                            "/get_docx - для получения в формате Word\n"
+                            "/get_pdf - для получения в формате PDF\n"
+                            "/get_text - для получения в виде текста"
+                        )
+                        # Сохраняем ответ во временное хранилище для последующего использования
+                        user_id = update.effective_user.id
+                        if user_id not in user_contexts:
+                            user_contexts[user_id] = {}
+                        if "temp_reply" not in user_contexts[user_id]:
+                            user_contexts[user_id]["temp_reply"] = {}
+                        user_contexts[user_id]["temp_reply"]["structured_reply"] = reply
+                    else:
+                        # Ответ не имеет подходящей структуры, отправляем как текст
+                        # Экранируем специальные символы Markdown, чтобы избежать ошибок
+                        safe_reply = escape_markdown(reply, version=2)
+                        # Send the message, splitting if necessary
+                        await send_long_message(
+                            update, safe_reply, parse_mode="MarkdownV2"
+                        )
+                except json.JSONDecodeError:
+                    # Ответ не является JSON, отправляем как текст
+                    # Экранируем специальные символы Markdown, чтобы избежать ошибок
                     safe_reply = escape_markdown(reply, version=2)
+                    # Send the message, splitting if necessary
                     await send_long_message(
                         update, safe_reply, parse_mode="MarkdownV2"
                     )
-                    print(f"Ошибка при создании или отправке DOCX файла: {e}")
-            else:
-                # Отправляем обычный ответ
-                # Экранируем специальные символы Markdown,
-                # чтобы избежать ошибок
-                safe_reply = escape_markdown(reply, version=2)
-                await send_long_message(
-                    update, safe_reply, parse_mode="MarkdownV2"
-                )
 
             # Списываем монеты и записываем лог
             from billing_utils import check_user_coins
@@ -594,7 +613,7 @@ async def handle_ai_file_mode(
         )
 
 
-async def handle_image_mode(
+async def handle_image_create_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
@@ -615,61 +634,9 @@ async def handle_image_mode(
 
     try:
         image_url = await models_config.generate_image(user_message)
-
-        if wants_word_format:
-            # Создаем DOCX файл с описанием изображения
-            try:
-                # Создаем простой текст описания
-                description_text = (
-                    f"Сгенерированное изображение\n\n"
-                    f" Запрос: {user_message}\n\n"
-                    f" Изображение было сгенерировано по вашему запросу."
-                )
-
-                # Парсим запрос пользователя на предмет форматирования
-                formatting_instructions = docx_utils.parse_formatting_request(
-                    user_message
-                )
-
-                # Очищаем содержимое от форматирования и упоминаний о DOCX
-                clean_description_text = docx_utils.clean_content_for_docx(
-                    description_text
-                )
-
-                # Создаем DOCX файл
-                docx_file = docx_utils.create_formatted_docx(
-                    clean_description_text, formatting_instructions
-                )
-                # Убедимся, что указатель находится в начале файла
-                docx_file.seek(0)
-
-                # Отправляем DOCX файл пользователю и изображение
-                await update.message.reply_document(
-                    document=docx_file,
-                    filename="document.docx",
-                    caption="""
-                        Описание сгенерированного изображения
-                        в формате Word (DOCX)
-                        """,
-                )
-                await update.message.reply_photo(
-                    image_url,
-                    caption=f"Сгенерировано по запросу: {user_message}",
-                )
-            except Exception as e:
-                # Если не удалось создать или отправить DOCX,
-                # отправляем обычное сообщение
-                await update.message.reply_photo(
-                    image_url,
-                    caption=f"Сгенерировано по запросу: {user_message}",
-                )
-                print(f"Ошибка при создании или отправке DOCX файла: {e}")
-        else:
-            # Отправляем обычное изображение
-            await update.message.reply_photo(
-                image_url, caption=f"Сгенерировано по запросу: {user_message}"
-            )
-
+        await update.message.reply_photo(
+            image_url, caption=f"Сгенерировано по запросу: {user_message}"
+        )
         # Списываем монеты и записываем лог
         spend_coins(user_id, cost, coins, giftcoins, "image", user_message, "")
     except Exception as e:
@@ -766,8 +733,15 @@ async def handle_chat_mode(
         wants_word_format = docx_utils.check_user_wants_word_format(
             user_message
         )
+        # Проверяем, хочет ли пользователь получить ответ в формате PDF
+        wants_pdf_format = pdf_utils.check_user_wants_pdf_format(
+            user_message
+        )
+
         if wants_word_format:
             user_message = user_message + " " + docx_utils.JSON_SCHEMA
+        elif wants_pdf_format:
+            user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
 
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
@@ -802,32 +776,52 @@ async def handle_chat_mode(
 
         if wants_word_format:
             # Создаем DOCX файл с ответом
+            await send_docx_response(update, reply)
+        elif wants_pdf_format:
+            # Создаем PDF файл с ответом
+            await send_pdf_response(update, reply)
+        else:
+            # Проверяем, является ли ответ валидным JSON с подходящей структурой
+            # для форматов DOCX/PDF
+            import json
             try:
-                data = json.loads(reply)
-                doc_io = io.BytesIO()
-                renderer = docx_utils.DocxRenderer()
-                renderer.render(data, doc_io)
-                doc_io.seek(0)
-
-                await update.message.reply_document(
-                    document=InputFile(doc_io, filename="document.docx"),
-                    caption="Ваш ответ в формате Word",
-                )
-            except Exception as e:
-                # Если не удалось создать или отправить DOCX,
-                # отправляем обычное сообщение
+                parsed_reply = json.loads(reply)
+                # Проверяем наличие обязательных полей для форматов
+                if isinstance(parsed_reply, dict) and (
+                    "meta" in parsed_reply or "blocks" in parsed_reply
+                ):
+                    # Ответ имеет структуру, подходящую для DOCX/PDF
+                    # Предлагаем пользователю выбрать формат
+                    await update.message.reply_text(
+                        "Я подготовил структурированный ответ. "
+                        "В каком формате вы хотите получить результат?\n"
+                        "/get_docx - для получения в формате Word\n"
+                        "/get_pdf - для получения в формате PDF\n"
+                        "/get_text - для получения в виде текста"
+                    )
+                    # Сохраняем ответ во временное хранилище для последующего использования
+                    user_id = update.effective_user.id
+                    if user_id not in user_contexts:
+                        user_contexts[user_id] = {}
+                    if "temp_reply" not in user_contexts[user_id]:
+                        user_contexts[user_id]["temp_reply"] = {}
+                    user_contexts[user_id]["temp_reply"]["structured_reply"] = reply
+                else:
+                    # Ответ не имеет подходящей структуры, отправляем как текст
+                    # Экранируем специальные символы Markdown, чтобы избежать ошибок
+                    safe_reply = escape_markdown(reply, version=2)
+                    # Send the message, splitting if necessary
+                    await send_long_message(
+                        update, safe_reply, parse_mode="MarkdownV2"
+                    )
+            except json.JSONDecodeError:
+                # Ответ не является JSON, отправляем как текст
+                # Экранируем специальные символы Markdown, чтобы избежать ошибок
                 safe_reply = escape_markdown(reply, version=2)
+                # Send the message, splitting if necessary
                 await send_long_message(
                     update, safe_reply, parse_mode="MarkdownV2"
                 )
-                print(f"Ошибка при создании или отправке DOCX файла: {e}")
-        else:
-            # Экранируем специальные символы Markdown, чтобы избежать ошибок
-            safe_reply = escape_markdown(reply, version=2)
-            # Send the message, splitting if necessary
-            await send_long_message(
-                update, safe_reply, parse_mode="MarkdownV2"
-            )
 
         # Списываем монеты и записываем лог
         spend_coins(
@@ -920,7 +914,7 @@ async def handle_message_or_voice(
 
     # Handle file uploads in file_analysis mode
     if current_mode == "ai_file":
-        await handle_ai_file_mode(
+        await handle_file_analysis_mode(
             update,
             context,
             user_id,
@@ -932,14 +926,14 @@ async def handle_message_or_voice(
 
     # Обработка режима редактирования изображений
     if current_mode == "edit":
-        await handle_edit_mode(
+        await handle_image_edit_mode(
             update, context, user_id, user_message, cost, balance
         )
         return
 
     # Обработка в зависимости от режима
     if current_mode == "image":
-        await handle_image_mode(
+        await handle_image_create_mode(
             update,
             context,
             user_id,
@@ -964,3 +958,54 @@ async def handle_message_or_voice(
             balance,
         )
         return
+
+
+async def handle_get_docx_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка команды /get_docx"""
+    user_id = update.effective_user.id
+    
+    # Проверяем, есть ли у пользователя сохраненный структурированный ответ
+    if user_id in user_contexts and "temp_reply" in user_contexts[user_id]:
+        if "structured_reply" in user_contexts[user_id]["temp_reply"]:
+            reply = user_contexts[user_id]["temp_reply"]["structured_reply"]
+            await send_docx_response(update, reply)
+            # Удаляем временный ответ после использования
+            del user_contexts[user_id]["temp_reply"]["structured_reply"]
+            return
+    
+    await update.message.reply_text("Не найден структурированный ответ для конвертации в DOCX.")
+
+
+async def handle_get_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка команды /get_pdf"""
+    user_id = update.effective_user.id
+    
+    # Проверяем, есть ли у пользователя сохраненный структурированный ответ
+    if user_id in user_contexts and "temp_reply" in user_contexts[user_id]:
+        if "structured_reply" in user_contexts[user_id]["temp_reply"]:
+            reply = user_contexts[user_id]["temp_reply"]["structured_reply"]
+            await send_pdf_response(update, reply)
+            # Удаляем временный ответ после использования
+            del user_contexts[user_id]["temp_reply"]["structured_reply"]
+            return
+    
+    await update.message.reply_text("Не найден структурированный ответ для конвертации в PDF.")
+
+
+async def handle_get_text_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка команды /get_text"""
+    user_id = update.effective_user.id
+    
+    # Проверяем, есть ли у пользователя сохраненный структурированный ответ
+    if user_id in user_contexts and "temp_reply" in user_contexts[user_id]:
+        if "structured_reply" in user_contexts[user_id]["temp_reply"]:
+            reply = user_contexts[user_id]["temp_reply"]["structured_reply"]
+            from telegram.helpers import escape_markdown
+            safe_reply = escape_markdown(reply, version=2)
+            from message_utils import send_long_message
+            await send_long_message(update, safe_reply, parse_mode="MarkdownV2")
+            # Удаляем временный ответ после использования
+            del user_contexts[user_id]["temp_reply"]["structured_reply"]
+            return
+    
+    await update.message.reply_text("Не найден структурированный ответ для отображения в виде текста.")
