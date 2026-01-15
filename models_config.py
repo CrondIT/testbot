@@ -64,7 +64,6 @@ async def get_gemini_models_info() -> str:
     try:
         models = client_edit_image.models.list()
         lines = ["🤖 Доступные модели Gemini:\n"]
-        lines = ["🤖 Доступные модели Gemini:\n"]
 
         for model in models:
             # Имя модели теперь в атрибуте 'name'

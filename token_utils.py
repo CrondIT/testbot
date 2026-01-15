@@ -4,6 +4,32 @@ import tiktoken
 from typing import List, Dict, Any, Union
 
 
+def get_token_limit(model_name: str) -> int:
+    """
+    Get the maximum token limit for a specific model
+    """
+    limits = {
+        # OpenAI models
+        "gpt-5.2": 128000,
+        "gpt-5.1": 128000,
+        "gpt-4o-mini": 128000,
+        "gpt-4-turbo": 128000,
+        "gpt-4o": 128000,
+        "gpt-4": 8192,
+        "gpt-5.2-chat-latest": 128000,
+        # DALL-E models
+        "dall-e-3": 4096,  # Prompt length limit
+        # Gemini models
+        "gemini-2.5-flash-preview-image": 1048576,
+        "gemini-2.5-pro": 2097152,
+        "gemini-2.5-flash-image": 32768,
+        "gemini-1.5-pro": 1048576,
+        "gemini-1.0-pro": 32768,
+    }
+
+    return limits.get(model_name, 4096)  # Default fallback
+
+
 class TokenCounter:
     """
     Utility class to count tokens for different AI models
@@ -133,32 +159,6 @@ class TokenCounter:
 
 # Create a global instance
 token_counter = TokenCounter()
-
-
-def get_token_limit(model_name: str) -> int:
-    """
-    Get the maximum token limit for a specific model
-    """
-    limits = {
-        # OpenAI models
-        "gpt-5.2": 128000,
-        "gpt-5.1": 128000,
-        "gpt-4o-mini": 128000,
-        "gpt-4-turbo": 128000,
-        "gpt-4o": 128000,
-        "gpt-4": 8192,
-        "gpt-3.5-turbo": 16385,
-        # DALL-E models
-        "dall-e-3": 4096,  # Prompt length limit
-        # Gemini models
-        "gemini-2.5-flash-preview-image": 1048576,
-        "gemini-2.5-pro": 2097152,
-        "gemini-2.5-flash-image": 32768,
-        "gemini-1.5-pro": 1048576,
-        "gemini-1.0-pro": 32768,
-    }
-
-    return limits.get(model_name, 4096)  # Default fallback
 
 
 def truncate_messages_for_token_limit(

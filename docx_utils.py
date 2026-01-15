@@ -3,9 +3,8 @@
 import re
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches
-
-# from docx.oxml.shared import OxmlElement
+from docx.shared import Inches, Mm
+from docx.oxml.shared import OxmlElement, qn
 import io
 import json
 from telegram import InputFile
@@ -13,8 +12,13 @@ from telegram.helpers import escape_markdown
 import matplotlib
 import matplotlib.pyplot as plt
 
-# from pylatexenc.latex2text import LatexNodes2Text
-# from latex2mathml.converter import convert
+# Константы для формата страницы и полей (в миллиметрах)
+DEFAULT_PAGE_WIDTH_MM = 210  # Ширина A4 в мм
+DEFAULT_PAGE_HEIGHT_MM = 297  # Высота A4 в мм
+DEFAULT_LEFT_MARGIN_MM = 20  # Левое поле по умолчанию
+DEFAULT_RIGHT_MARGIN_MM = 10  # Правое поле по умолчанию
+DEFAULT_TOP_MARGIN_MM = 15  # Верхнее поле по умолчанию
+DEFAULT_BOTTOM_MARGIN_MM = 15  # Нижнее поле по умолчанию
 
 
 def clean_html_tags(text):
@@ -99,6 +103,14 @@ JSON_SCHEMA = """
 class DocxRenderer:
     def __init__(self):
         self.doc = Document()
+        # Установка полей страницы по умолчанию
+        section = self.doc.sections[0]
+        section.page_width = Mm(DEFAULT_PAGE_WIDTH_MM)
+        section.page_height = Mm(DEFAULT_PAGE_HEIGHT_MM)
+        section.left_margin = Mm(DEFAULT_LEFT_MARGIN_MM)
+        section.right_margin = Mm(DEFAULT_RIGHT_MARGIN_MM)
+        section.top_margin = Mm(DEFAULT_TOP_MARGIN_MM)
+        section.bottom_margin = Mm(DEFAULT_BOTTOM_MARGIN_MM)
 
     def render(self, data: dict, output):
         """
@@ -208,6 +220,32 @@ class DocxRenderer:
                 b = int(color[4:6], 16)
                 run.font.color.rgb = RGBColor(r, g, b)
 
+        # Применяем отступы и интервалы
+        if (
+            left_indent is not None
+            or right_indent is not None
+            or space_after is not None
+        ):
+            paragraph_format = p.paragraph_format
+            if left_indent is not None:
+                from docx.shared import Inches
+
+                paragraph_format.left_indent = Inches(
+                    left_indent / 10.0
+                )  # Преобразуем в дюймы
+            if right_indent is not None:
+                from docx.shared import Inches
+
+                paragraph_format.right_indent = Inches(
+                    right_indent / 10.0
+                )  # Преобразуем в дюймы
+            if space_after is not None:
+                from docx.shared import Pt
+
+                paragraph_format.space_after = Pt(
+                    space_after
+                )  # Интервал после абзаца в пунктах
+
         # Выравнивание
         if alignment == "center":
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -252,6 +290,32 @@ class DocxRenderer:
                         g = int(color[2:4], 16)
                         b = int(color[4:6], 16)
                         run.font.color.rgb = RGBColor(r, g, b)
+
+            # Применяем отступы и интервалы
+            if (
+                left_indent is not None
+                or right_indent is not None
+                or space_after is not None
+            ):
+                paragraph_format = p.paragraph_format
+                if left_indent is not None:
+                    from docx.shared import Inches
+
+                    paragraph_format.left_indent = Inches(
+                        left_indent / 10.0
+                    )  # Преобразуем в дюймы
+                if right_indent is not None:
+                    from docx.shared import Inches
+
+                    paragraph_format.right_indent = Inches(
+                        right_indent / 10.0
+                    )  # Преобразуем в дюймы
+                if space_after is not None:
+                    from docx.shared import Pt
+
+                    paragraph_format.space_after = Pt(
+                        space_after
+                    )  # Интервал после абзаца в пунктах
 
             # Выравнивание
             if alignment == "center":
@@ -338,6 +402,17 @@ class DocxRenderer:
                         b = int(header_color[4:6], 16)
                         run.font.color.rgb = RGBColor(r, g, b)
 
+        # Применяем фоновый цвет к заголовкам, если указан
+        if header_bg_color:
+            for i, header in enumerate(headers):
+                # Получаем XML элемент ячейки
+                tc = hdr_cells[i]._tc
+                # Создаем элемент заливки
+                tcFill = OxmlElement("w:shd")
+                tcFill.set(qn("w:fill"), header_bg_color.replace("#", ""))
+                # Добавляем заливку к ячейке
+                tc.get_or_add_tcPr().append(tcFill)
+
         # Данные
         for row in rows:
             cells = table.add_row().cells
@@ -394,8 +469,12 @@ class DocxRenderer:
         # Используем параметры из JSON, если они есть, иначе - стандартные
         font_name = block.get("font_name", None)
         font_size = block.get("font_size", None)
-        math_font_size = block.get("math_font_size", 12)
-        caption_font_size = block.get("caption_font_size", 10)
+        # Используем font_size как fallback,
+        # если конкретные параметры не указаны
+        math_font_size = block.get("math_font_size", None) or font_size or 12
+        caption_font_size = (
+            block.get("caption_font_size", None) or font_size or 10
+        )
         bold = block.get("bold", False)
         italic = block.get("italic", True)  # По умолчанию курсив для формул
         alignment = block.get("alignment", "left")  # left, center, right
@@ -404,8 +483,23 @@ class DocxRenderer:
         # Создаем изображение с формулой с помощью matplotlib
         # Это более надежный способ отображения сложных формул в Word
         try:
-            # Настройка фигуры matplotlib
-            fig, ax = plt.subplots(figsize=(8, 2))
+            # Настройка фигуры matplotlib с размерами,
+            # пропорциональными длине формулы
+            # Преобразуем размеры из миллиметров в дюймы (1 дюйм = 25.4 мм)
+            base_width_mm = 60  # базовая ширина в мм
+            width_factor = min(
+                len(formula) / 10, 3
+            )  # масштабируем в зависимости от длины формулы не более чем х3
+            width_mm = base_width_mm * width_factor
+
+            # Высота пропорциональна ширине, но с минимальным значением
+            height_mm = max(width_mm * 0.2, 15)  # высота в мм, не менее 15 мм
+
+            # Преобразуем миллиметры в дюймы для matplotlib
+            width_inches = width_mm / 25.4
+            height_inches = height_mm / 25.4
+
+            fig, ax = plt.subplots(figsize=(width_inches, height_inches))
             ax.text(
                 0.5,
                 0.5,

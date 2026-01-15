@@ -8,6 +8,7 @@ import file_utils
 import billing_utils
 import models_config
 import docx_utils
+import xlsx_utils
 import image_utils
 import pdf_utils
 from telegram import Update
@@ -23,6 +24,7 @@ from global_state import (
 from message_utils import send_long_message
 from pdf_utils import send_pdf_response
 from docx_utils import send_docx_response
+from xlsx_utils import send_xlsx_response
 
 
 def initialize_user_context(user_id: int, current_mode: str):
@@ -74,7 +76,8 @@ async def handle_image_edit_mode(
                 original_image = user_edit_data[user_id]["original_image"]
                 # Редактируем изображение с помощью Gemini
                 edited_image_data = await models_config.edit_image_with_gemini(
-                    original_image, user_message)
+                    original_image, user_message
+                )
                 # Сохраняем изображение во временный файл
                 file_path = await image_utils.save_image_from_data(
                     edited_image_data, f"edited_{user_id}"
@@ -143,13 +146,15 @@ async def handle_file_analysis_mode(
     from billing_utils import spend_coins
 
     wants_word_format = docx_utils.check_user_wants_word_format(user_message)
-    # Проверяем, хочет ли пользователь получить ответ в формате PDF
     wants_pdf_format = pdf_utils.check_user_wants_pdf_format(user_message)
+    wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(user_message)
 
     if wants_word_format:
         user_message = user_message + " " + docx_utils.JSON_SCHEMA
     elif wants_pdf_format:
         user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
+    elif wants_excel_format:
+        user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
 
     # Check if the message contains a document
     if update.message.document:
@@ -458,8 +463,11 @@ async def handle_file_analysis_mode(
             elif wants_pdf_format:
                 # Создаем PDF файл с ответом
                 await send_pdf_response(update, reply)
+            elif wants_excel_format:
+                # Создаем PDF файл с ответом
+                await send_xlsx_response(update, reply)
             else:
-                # Проверяем, является ли ответ валидным JSON 
+                # Проверяем, является ли ответ валидным JSON
                 # с подходящей структурой
                 # для форматов DOCX/PDF
                 import json
@@ -479,7 +487,7 @@ async def handle_file_analysis_mode(
                             "/get_pdf - для получения в формате PDF\n"
                             "/get_text - для получения в виде текста"
                         )
-                        # Сохраняем ответ во временное хранилище для 
+                        # Сохраняем ответ во временное хранилище для
                         # последующего использования
                         user_id = update.effective_user.id
                         if user_id not in user_contexts:
@@ -490,7 +498,7 @@ async def handle_file_analysis_mode(
                             "structured_reply"
                         ] = reply
                     else:
-                        # Ответ не имеет подходящей структуры, 
+                        # Ответ не имеет подходящей структуры,
                         # отправляем как текст
                         # Экранируем специальные символы Markdown,
                         # чтобы избежать ошибок
@@ -598,18 +606,22 @@ async def handle_chat_mode(
         # Include chat history for context with proper token limit
         model_name = models_config.MODELS.get("chat")
         user_context = []
-        # Проверяем, хочет ли пользователь получить ответ в формате Word
+
         wants_word_format = docx_utils.check_user_wants_word_format(
             user_message
         )
-        # Проверяем, хочет ли пользователь получить ответ в формате PDF
-        wants_pdf_format = pdf_utils.check_user_wants_pdf_format(user_message)
-
+        wants_pdf_format = pdf_utils.check_user_wants_pdf_format(
+            user_message
+        )
+        wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(
+            user_message
+        )
         if wants_word_format:
             user_message = user_message + " " + docx_utils.JSON_SCHEMA
         elif wants_pdf_format:
             user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
-
+        elif wants_excel_format:
+            user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
             temp_history = user_contexts[user_id]["chat"] + [
@@ -647,6 +659,9 @@ async def handle_chat_mode(
         elif wants_pdf_format:
             # Создаем PDF файл с ответом
             await send_pdf_response(update, reply)
+        elif wants_excel_format:
+            # Создаем EXCEL файл с ответом
+            await send_xlsx_response(update, reply)
         else:
             # Ответ не имеет подходящей структуры, отправляем как текст
             # Экранируем специальные символы Markdown, чтобы избежать ошибок

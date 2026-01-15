@@ -11,7 +11,6 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -20,6 +19,66 @@ import json
 from telegram import InputFile
 from telegram.helpers import escape_markdown
 from message_utils import send_long_message
+from reportlab.lib.colors import Color as RLColor
+import reportlab.lib.colors as colors_module
+
+# Создаем объект изображения для ReportLab
+from reportlab.platypus import Image as RLImage
+
+
+def parse_color(color_value):
+    """
+    Универсальная функция для обработки различных форматов цветов
+
+    Args:
+        color_value: Значение цвета в одном из поддерживаемых форматов:
+                     - строка с именем цвета ('black', 'red', и т.д.)
+                     - строка в формате HEX ('#FF0000')
+                     - кортеж/список RGB ((255, 0, 0))
+                     - объект Color из reportlab
+
+    Returns:
+        Объект Color из reportlab
+    """
+    if isinstance(color_value, RLColor):
+        # Если уже объект Color, используем его напрямую
+        return color_value
+    elif isinstance(color_value, str):
+        if color_value.startswith("#"):
+            # HEX-формат, например "#FF5733"
+            hex_color = color_value.lstrip("#")
+            # Проверяем длину HEX-кода (может быть 3 или 6 символов)
+            if len(hex_color) == 3:
+                # Формат с сокращенным представлением (RGB)
+                rgb = tuple(
+                    int(hex_color[i], 16) * 17 for i in range(3)
+                )  # Умножаем на 17 для расширения 0-F до 0-255
+            elif len(hex_color) == 6:
+                # Полный формат (RRGGBB)
+                rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+            else:
+                raise ValueError(
+                    f"Неподдерживаемый формат HEX цвета: {color_value}"
+                )
+            return RLColor(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+        else:
+            # Проверяем, является ли это именованным цветом из reportlab
+            try:
+                color_obj = getattr(colors_module, color_value.lower())
+                if not isinstance(color_obj, RLColor):
+                    raise AttributeError
+                return color_obj
+            except AttributeError:
+                raise ValueError(
+                    f"Неподдерживаемый формат цвета: {color_value}"
+                )
+    elif isinstance(color_value, (tuple, list)) and len(color_value) == 3:
+        # RGB в формате (R, G, B), где 0 <= R,G,B <= 255
+        r, g, b = color_value
+        return RLColor(r / 255.0, g / 255.0, b / 255.0)
+    else:
+        raise ValueError(f"Неподдерживаемый формат цвета: {color_value}")
+
 
 # JSON схема для PDF, аналогичная DOCX
 JSON_SCHEMA_PDF = """
@@ -46,8 +105,8 @@ JSON_SCHEMA_PDF = """
                "body_font_size":9,
                "grid_width":0.5,
                "grid_color":"black",
-               "header_bg_color":"green",
-               "header_text_color":"whitesmoke",
+               "header_bg_color":"cyan",
+               "header_text_color":"black",
                "align":"LEFT",
                "valign":"TOP",
                "padding_top":6,
@@ -261,10 +320,8 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             )
             # Если указан цвет, добавляем его
             if text_color:
-                from reportlab.lib.colors import Color
-
-                # Здесь можно добавить обработку цвета, если он в формате RGB
-                pass
+                # Применяем цвет к стилю заголовка
+                heading_style.textColor = parse_color(text_color)
 
             heading = Paragraph(text, heading_style)
             elements.append(heading)
@@ -300,6 +357,11 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 fontName=font_name,
                 alignment=alignment_val,
             )
+
+            # Применяем цвет, если он указан
+            if text_color:
+                # Применяем цвет к стилю параграфа
+                paragraph_style.textColor = parse_color(text_color)
 
             # Применяем форматирование из JSON
             if block.get("bold"):
@@ -362,10 +424,12 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             )  # Нормализуем имя шрифта
             body_font_size = table_params.get("body_font_size", 9)
             grid_width = table_params.get("grid_width", 0.5)
-            grid_color = table_params.get("grid_color", colors.black)
-            header_bg_color = table_params.get("header_bg_color", colors.gray)
-            header_text_color = table_params.get(
-                "header_text_color", colors.whitesmoke
+            grid_color = parse_color(table_params.get("grid_color", "black"))
+            header_bg_color = parse_color(
+                table_params.get("header_bg_color", "gray")
+            )
+            header_text_color = parse_color(
+                table_params.get("header_text_color", "whitesmoke")
             )
             align = table_params.get("align", "LEFT")
             valign = table_params.get("valign", "TOP")
@@ -534,6 +598,12 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                                 (-1, 0),
                                 header_bg_color,
                             ),  # Цвет фона заголовка из JSON
+                            (
+                                "TEXTCOLOR",
+                                (0, 0),
+                                (-1, 0),
+                                header_text_color,
+                            ),  # Цвет текста заголовка из JSON
                         ]
                     )
                 )
@@ -542,7 +612,8 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 elements.append(Spacer(1, 12))
 
         elif block_type == "math":
-            # Для формул добавляем как обычный параграф с параметрами из JSON
+            # Для формул добавляем как изображение
+            # с формулой или как обычный параграф
             formula = block.get("formula", "")
             caption = block.get("caption", "")
 
@@ -551,54 +622,187 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             font_name = normalize_font_name(
                 font_name
             )  # Нормализуем имя шрифта
-            font_size = block.get("font_size", 12)
-            math_font_size = block.get("math_font_size", 12)
-            caption_font_size = block.get("caption_font_size", 10)
+            font_size = block.get("font_size", None)
+            # Используем font_size как fallback,
+            # если конкретные параметры не указаны
+            math_font_size = (
+                block.get("math_font_size", None) or font_size or 12
+            )
+            caption_font_size = (
+                block.get("caption_font_size", None) or font_size or 10
+            )
             bold = block.get("bold", False)
             italic = block.get(
                 "italic", True
             )  # По умолчанию курсив для формул
             alignment = block.get("alignment", "left")  # left, center, right
 
-            # Определяем выравнивание
-            alignment_val = TA_LEFT
-            if alignment == "center":
-                alignment_val = TA_CENTER
-            elif alignment == "right":
-                alignment_val = TA_RIGHT
+            # Попробуем создать изображение с формулой с помощью matplotlib
+            try:
+                import matplotlib
+                import matplotlib.pyplot as plt
+                import io as io_module
 
-            # Создаем стиль для формулы
-            math_style = ParagraphStyle(
-                "MathStyle",
-                parent=styles["Normal"],
-                fontSize=math_font_size,
-                fontName=font_name,
-                alignment=alignment_val,
-            )
+                matplotlib.use("Agg")  # Use non-interactive backend
 
-            # Формируем текст формулы
-            formula_text = f"Формула: {formula}"
-            if bold:
-                formula_text = f"<b>{formula_text}</b>"
-            if italic:
-                formula_text = f"<i>{formula_text}</i>"
+                # Настройка фигуры matplotlib с размерами,
+                # пропорциональными длине формулы
+                # Преобразуем размеры из миллиметров в дюймы (1 дюйм = 25.4 мм)
+                base_width_mm = 60  # базовая ширина в мм
+                width_factor = min(
+                    len(formula) / 10, 3
+                )  # масштабируем в зависимости от длины формулы, не более х3
+                width_mm = base_width_mm * width_factor
 
-            # Добавляем формулу как специальный параграф
-            math_para = Paragraph(formula_text, math_style)
-            elements.append(math_para)
+                # Высота пропорциональна ширине, но с минимальным значением
+                height_mm = max(
+                    width_mm * 0.2, 15
+                )  # высота в мм, не менее 15 мм
 
-            if caption:
-                # Создаем стиль для подписи
-                caption_style = ParagraphStyle(
-                    "CaptionStyle",
+                # Преобразуем миллиметры в дюймы для matplotlib
+                width_inches = width_mm / 25.4
+                height_inches = height_mm / 25.4
+
+                fig, ax = plt.subplots(figsize=(width_inches, height_inches))
+                ax.text(
+                    0.5,
+                    0.5,
+                    f"${formula}$",
+                    fontsize=16,
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+                ax.axis("off")  # Скрыть оси
+
+                # Сохраняем в байтовый поток
+                img_buffer = io_module.BytesIO()
+                plt.savefig(
+                    img_buffer, format="png", bbox_inches="tight", dpi=150
+                )
+                img_buffer.seek(0)
+
+                # Закрываем фигуру matplotlib
+                plt.close(fig)
+
+                # Преобразуем размеры из миллиметров в точки
+                # (1 мм = 2.834645669 points)
+                width_points = width_mm * 2.834645669
+                height_points = height_mm * 2.834645669
+
+                # Создаем изображение с подходящими размерами
+                img = RLImage(
+                    img_buffer, width=width_points, height=height_points
+                )
+
+                # Выравнивание изображения
+                if alignment == "center":
+                    img.hAlign = "CENTER"
+                elif alignment == "right":
+                    img.hAlign = "RIGHT"
+                else:
+                    img.hAlign = "LEFT"
+
+                elements.append(img)
+
+                if caption:
+                    # Создаем стиль для подписи
+                    caption_style = ParagraphStyle(
+                        "CaptionStyle",
+                        parent=styles["Normal"],
+                        fontSize=caption_font_size,
+                        fontName=font_name,
+                        alignment=TA_LEFT if alignment != "left" else TA_LEFT,
+                    )
+
+                    caption_para = Paragraph(caption, caption_style)
+                    elements.append(caption_para)
+
+            except ImportError:
+                # Если matplotlib не установлен, используем обычный текст
+                # Определяем выравнивание
+                alignment_val = TA_LEFT
+                if alignment == "center":
+                    alignment_val = TA_CENTER
+                elif alignment == "right":
+                    alignment_val = TA_RIGHT
+
+                # Создаем стиль для формулы
+                math_style = ParagraphStyle(
+                    "MathStyle",
                     parent=styles["Normal"],
-                    fontSize=caption_font_size,
+                    fontSize=math_font_size,
                     fontName=font_name,
                     alignment=alignment_val,
                 )
 
-                caption_para = Paragraph(caption, caption_style)
-                elements.append(caption_para)
+                # Формируем текст формулы
+                formula_text = f"Формула: {formula}"
+                if bold:
+                    formula_text = f"<b>{formula_text}</b>"
+                if italic:
+                    formula_text = f"<i>{formula_text}</i>"
+
+                # Добавляем формулу как специальный параграф
+                math_para = Paragraph(formula_text, math_style)
+                elements.append(math_para)
+
+                if caption:
+                    # Создаем стиль для подписи
+                    caption_style = ParagraphStyle(
+                        "CaptionStyle",
+                        parent=styles["Normal"],
+                        fontSize=caption_font_size,
+                        fontName=font_name,
+                        alignment=alignment_val,
+                    )
+
+                    caption_para = Paragraph(caption, caption_style)
+                    elements.append(caption_para)
+            except Exception as e:
+                # Если возникла ошибка при создании изображения,
+                # используем обычный текст
+                print(f"Ошибка при создании изображения формулы: {e}")
+
+                # Определяем выравнивание
+                alignment_val = TA_LEFT
+                if alignment == "center":
+                    alignment_val = TA_CENTER
+                elif alignment == "right":
+                    alignment_val = TA_RIGHT
+
+                # Создаем стиль для формулы
+                math_style = ParagraphStyle(
+                    "MathStyle",
+                    parent=styles["Normal"],
+                    fontSize=math_font_size,
+                    fontName=font_name,
+                    alignment=alignment_val,
+                )
+
+                # Формируем текст формулы
+                formula_text = f"Формула: {formula}"
+                if bold:
+                    formula_text = f"<b>{formula_text}</b>"
+                if italic:
+                    formula_text = f"<i>{formula_text}</i>"
+
+                # Добавляем формулу как специальный параграф
+                math_para = Paragraph(formula_text, math_style)
+                elements.append(math_para)
+
+                if caption:
+                    # Создаем стиль для подписи
+                    caption_style = ParagraphStyle(
+                        "CaptionStyle",
+                        parent=styles["Normal"],
+                        fontSize=caption_font_size,
+                        fontName=font_name,
+                        alignment=alignment_val,
+                    )
+
+                    caption_para = Paragraph(caption, caption_style)
+                    elements.append(caption_para)
 
     # Собираем документ
     doc.build(elements)
@@ -645,7 +849,6 @@ async def send_pdf_response(update, reply):
         # Проверяем, что reply не пустой
         if not reply or reply.strip() == "":
             raise ValueError("Пустой ответ от модели")
-
         # Удаляем маркеры кода, если они есть
         cleaned_reply = reply.strip()
         if cleaned_reply.startswith("```json"):
@@ -657,7 +860,6 @@ async def send_pdf_response(update, reply):
             cleaned_reply = cleaned_reply[:-3]  # Удаляем закрывающий '```'
 
         cleaned_reply = cleaned_reply.strip()
-
         data = json.loads(cleaned_reply)
         pdf_buffer = create_pdf_from_json(data)
 
