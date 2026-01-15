@@ -156,16 +156,44 @@ class XlsxRenderer:
         # Обработка параметра border
         if "border" in format_copy:
             border_value = format_copy["border"]
-            # В xlsxwriter используется общий параметр border,
-            # а не отдельные стороны
+            # В xlsxwriter для полного применения границ нужно установить
+            # отдельные параметры для каждой стороны
             if border_value == "thin":
-                format_copy.update({"border": 1, "border_color": "black"})
+                # Устанавливаем границы для всех сторон
+                format_copy.update({
+                    "top": 1,
+                    "bottom": 1,
+                    "left": 1,
+                    "right": 1,
+                    "top_color": "black",
+                    "bottom_color": "black",
+                    "left_color": "black",
+                    "right_color": "black"
+                })
             elif border_value == "medium":
-                format_copy.update({"border": 2, "border_color": "black"})
+                format_copy.update({
+                    "top": 2,
+                    "bottom": 2,
+                    "left": 2,
+                    "right": 2,
+                    "top_color": "black",
+                    "bottom_color": "black",
+                    "left_color": "black",
+                    "right_color": "black"
+                })
             elif border_value == "thick":
-                format_copy.update({"border": 3, "border_color": "black"})
-            # Удаляем исходный параметр border, так как он заменен 
-            # общим параметром
+                format_copy.update({
+                    "top": 3,
+                    "bottom": 3,
+                    "left": 3,
+                    "right": 3,
+                    "top_color": "black",
+                    "bottom_color": "black",
+                    "left_color": "black",
+                    "right_color": "black"
+                })
+            # Удаляем исходный параметр border, так как он заменен
+            # индивидуальными параметрами
             del format_copy["border"]
 
         return self.workbook.add_format(format_copy)
