@@ -4,7 +4,9 @@ coin management and payment callbacks."""
 from telegram import Update
 from telegram.ext import ContextTypes
 import dbbot
-import models_config
+from global_state import (
+   COST_PER_MESSAGE,
+)
 
 
 def spend_coins(
@@ -43,7 +45,7 @@ async def check_user_coins(user_id: int, current_mode: str, context) -> tuple:
     или (None, 0, 0, 0, 0) если проверка не пройдена.
     """
     # Определяем стоимость в зависимости от режима
-    cost = models_config.COST_PER_MESSAGE.get(current_mode)
+    cost = COST_PER_MESSAGE.get(current_mode)
     # Если стоимость не определена для режима
     # возвращаеи None и 0 монет
     if cost is None:
