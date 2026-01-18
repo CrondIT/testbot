@@ -25,6 +25,8 @@ from message_utils import send_long_message
 from pdf_utils import send_pdf_response
 from docx_utils import send_docx_response
 from xlsx_utils import send_xlsx_response
+from io import BytesIO
+from PIL import Image
 
 
 def initialize_user_context(user_id: int, current_mode: str):
@@ -494,6 +496,130 @@ async def handle_image_create_mode(
         await update.message.reply_text(f"⚠️ {str(e)}")
 
 
+async def handle_image_edit_mode(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    user_message: str,
+    cost: int,
+    coins: int,
+    giftcoins: int,
+    balance: float,
+):
+    """
+    Handle the edit mode functionality separately using Gemini.
+
+    Flow:
+    1. User uploads photo → save and ask for prompt
+    2. User sends text prompt → edit saved image
+    """
+    from billing_utils import spend_coins
+    from image_edit_utils import AsyncGeminiImageProcessor
+
+    # Инициализируем процессор изображений
+    processor = AsyncGeminiImageProcessor()
+
+    # Проверяем, загрузил ли пользователь изображение (фото)
+    if update.message.photo:
+        # Загружаем изображение
+        file = await context.bot.get_file(update.message.photo[-1].file_id)
+        image_bytes = await file.download_as_bytearray()
+
+        # Сохраняем изображение
+        if user_id not in user_edit_data:
+            user_edit_data[user_id] = {}
+        user_edit_data[user_id]["image"] = bytes(image_bytes)
+
+        await update.message.reply_text(
+            "✅ Изображение сохранено!\n"
+            "Теперь отправьте текстовый запрос для редактирования."
+        )
+        return
+
+    # Проверяем, есть ли текстовый промпт
+    if not user_message:
+        await update.message.reply_text(
+            "📷 Пожалуйста, загрузите изображение для редактирования."
+        )
+        return
+
+    # Проверяем, есть ли сохранённое изображение
+    if user_id not in user_edit_data or "image" not in user_edit_data[user_id]:
+        await update.message.reply_text(
+            "📷 Пожалуйста, загрузите изображение для редактирования."
+        )
+        return
+
+    # Загружаем сохранённое изображение
+    saved_image_data = user_edit_data[user_id]["image"]
+    image = Image.open(BytesIO(saved_image_data))
+
+    await update.message.reply_text("🖼️ Редактирую изображение...")
+
+    try:
+        # Определяем тип редактирования из user_message
+        prompt_lower = user_message.lower()
+
+        if "расширить" in prompt_lower or "дополнить" in prompt_lower:
+            # Outpainting - расширение изображения
+            result_image = await processor.outpainting(
+                prompt=user_message,
+                image=image,
+            )
+        elif "стиль" in prompt_lower or "в стиле" in prompt_lower:
+            # Style transfer требует второго изображения
+            if "style_image" in user_edit_data[user_id]:
+                style_image = Image.open(
+                    BytesIO(user_edit_data[user_id]["style_image"])
+                )
+                result_image = await processor.style_transfer(
+                    content_image=image,
+                    style_image=style_image,
+                )
+            else:
+                await update.message.reply_text(
+                    "⚠️ Для переноса стиля необходимо сначала "
+                    "загрузить изображение-стиль"
+                )
+                return
+        elif "изменить всё" in prompt_lower or "полностью изменить" in prompt_lower or "переосмыслить" in prompt_lower:
+            # Image-to-image transformation
+            result_image = await processor.image2image(
+                prompt=user_message,
+                image=image,
+            )
+        else:
+            # Inpainting по умолчанию (редактирование с маской)
+            result_image = await processor.inpainting(
+                prompt=user_message,
+                image=image,
+            )
+
+        # Сохраняем результат в BytesIO
+        output = BytesIO()
+        result_image.save(output, format="PNG")
+        output.seek(0)
+
+        # Отправляем результат пользователю
+        await update.message.reply_photo(
+            photo=output,
+            caption=f"Изменено по запросу: {user_message}",
+        )
+
+        # Обновляем сохранённое изображение для дальнейших правок
+        user_edit_data[user_id]["image"] = output.getvalue()
+
+        # Списываем монеты и записываем лог
+        spend_coins(user_id, cost, coins, giftcoins, "edit", user_message, "")
+
+    except Exception as e:
+        log_text = f"Ошибка редактирования изображения: {str(e)}"
+        dbbot.log_action(user_id, "edit", log_text, 0, balance)
+        await update.message.reply_text(
+            f"⚠️ Ошибка редактирования изображения: {str(e)}"
+        )
+
+
 async def handle_chat_mode(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -623,131 +749,6 @@ async def handle_voice_message(
             "⚠️ Не удалось распознать голосовое сообщение."
         )
         return None
-
-
-async def handle_image_edit_mode(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    user_message: str,
-    cost: int,
-    coins: int,
-    giftcoins: int,
-    balance: float,
-):
-    """Handle the image edit mode functionality separately"""
-    from billing_utils import spend_coins
-    from image_edit_utils import AsyncGeminiImageProcessor
-    import io
-
-    # Проверяем, есть ли у нас сохраненные данные для редактирования
-    if user_id not in user_edit_data:
-        user_edit_data[user_id] = {
-            "step": "waiting_image",  # waiting_image, waiting_prompt
-            "original_image": None,
-        }
-
-    current_step = user_edit_data[user_id]["step"]
-
-    # Если ожидаем изображение
-    if current_step == "waiting_image":
-        if update.message.photo or update.message.document:
-            # Получаем изображение
-            if update.message.photo:
-                # Берем фото в наибольшем разрешении
-                file = await context.bot.get_file(
-                    update.message.photo[-1].file_id
-                )
-            elif (
-                update.message.document
-                and update.message.document.mime_type.startswith("image")
-            ):
-                file = await context.bot.get_file(
-                    update.message.document.file_id
-                )
-            else:
-                await update.message.reply_text(
-                    "Пожалуйста, отправьте изображение для редактирования."
-                )
-                return
-
-            # Скачиваем изображение
-            image_stream = io.BytesIO()
-            await file.download_to_memory(image_stream)
-            image_stream.seek(0)
-
-            # Сохраняем изображение во временные данные
-            user_edit_data[user_id]["original_image"] = image_stream
-            user_edit_data[user_id]["step"] = "waiting_prompt"
-
-            await update.message.reply_text(
-                "🖼️ Изображение получено! Теперь опишите, что нужно изменить."
-            )
-        else:
-            await update.message.reply_text(
-                "Пожалуйста, отправьте изображение для редактирования."
-            )
-    # Если ожидаем описание изменений
-    elif current_step == "waiting_prompt" and user_message:
-        if user_edit_data[user_id]["original_image"] is None:
-            await update.message.reply_text(
-                "Сначала отправьте изображение для редактирования."
-            )
-            return
-
-        # Получаем оригинальное изображение
-        original_image = user_edit_data[user_id]["original_image"]
-
-        try:
-            await update.message.reply_text("🎨 Редактирую изображение...")
-
-            # Используем AsyncGeminiImageProcessor для редактирования
-            processor = AsyncGeminiImageProcessor()
-
-            # Преобразуем байты изображения в объект PIL.Image
-            from PIL import Image
-            original_pil_image = Image.open(original_image)
-
-            # Выполняем редактирование изображения
-            edited_pil_image = await processor.image2image(
-                prompt=user_message,
-                image=original_pil_image
-            )
-
-            # Преобразуем PIL изображение обратно в байты
-            edited_image_stream = io.BytesIO()
-            edited_pil_image.save(edited_image_stream, format='PNG')
-            edited_image_stream.seek(0)
-
-            await update.message.reply_photo(
-                photo=edited_image_stream,
-                caption=f"Изменения выполнены по запросу: {user_message}",
-            )
-
-            # Сброс состояния редактирования
-            user_edit_data[user_id]["step"] = "waiting_image"
-            user_edit_data[user_id]["original_image"] = None
-
-            # Списываем монеты и записываем лог
-            spend_coins(
-                user_id,
-                cost,
-                coins,
-                giftcoins,
-                "edit",
-                user_message,
-                "Image edited successfully",
-            )
-        except Exception as e:
-            # LOGGING ====================
-            log_text = f"Ошибка при редактировании изображения: {str(e)}"
-            dbbot.log_action(user_id, "edit", log_text, 0, balance)
-            await update.message.reply_text(
-                f"⚠️ Ошибка при редактировании изображения: {str(e)}"
-            )
-            # Сброс состояния редактирования в случае ошибки
-            user_edit_data[user_id]["step"] = "waiting_image"
-            user_edit_data[user_id]["original_image"] = None
 
 
 async def handle_message_or_voice(

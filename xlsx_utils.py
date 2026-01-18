@@ -33,7 +33,29 @@ JSON_SCHEMA_EXCEL = """
             "formats": {
                 "header": {"bold": true, "bg_color": "#D3D3D3"},
                 "cell": {"font_size": 12}
-            }
+            },
+            "column_widths": [20, 30, 15],  // Ширина столбцов
+            "rows": [
+                {
+                    "index": 0,
+                    "height": 25
+                }
+            ],
+            "cells": [
+                {
+                    "row": 0,
+                    "col": 0,
+                    "format": {
+                        "bold": true,
+                        "bg_color": "#D3D3D3",
+                        "border": "thin",
+                        "text_wrap": true,
+                        "num_format": "#,##0.00",
+                        "formula": "=SUM(B2:B10)",
+                        "bg_color": "#FFFF00"
+                    }
+                }
+            ]
         }
     ]
     }
@@ -89,6 +111,9 @@ class XlsxRenderer:
             headers = sheet_data.get("headers", [])
             data_rows = sheet_data.get("data", [])
             formats = sheet_data.get("formats", {})
+            column_widths = sheet_data.get("column_widths", [])
+            rows_config = sheet_data.get("rows", [])
+            cells_config = sheet_data.get("cells", [])
 
             # Создаем все возможные форматы
             header_format = self._create_format(formats.get("header", {}))
@@ -103,6 +128,12 @@ class XlsxRenderer:
                     additional_formats[format_name] = self._create_format(
                         format_props
                     )
+
+            # Устанавливаем высоту строк, если указано
+            for row_config in rows_config:
+                row_index = row_config.get("index", 0)
+                row_height = row_config.get("height", 15)
+                worksheet.set_row(row_index, row_height)
 
             # Записываем заголовки
             for col_num, header in enumerate(headers):
@@ -124,15 +155,42 @@ class XlsxRenderer:
                             if "total" in additional_formats:
                                 target_format = additional_formats["total"]
 
-                        worksheet.write(
-                            row_num, col_num, cell_data, target_format
-                        )
+                        # Проверяем, есть ли специальный формат для конкретной ячейки
+                        cell_found = False
+                        for cell_config in cells_config:
+                            if cell_config.get("row") == row_num and cell_config.get("col") == col_num:
+                                cell_format_props = cell_config.get("format", {})
+                                cell_specific_format = self._create_format(cell_format_props)
 
-            # Автонастройка ширины колонок
+                                # Проверяем, содержит ли ячейка формулу
+                                formula = cell_format_props.get("formula")
+                                if formula:
+                                    if cell_specific_format:
+                                        worksheet.write_formula(row_num, col_num, formula, cell_specific_format, cell_data)
+                                    else:
+                                        worksheet.write_formula(row_num, col_num, formula, cell_data)
+                                else:
+                                    if cell_specific_format:
+                                        worksheet.write(row_num, col_num, cell_data, cell_specific_format)
+                                    else:
+                                        worksheet.write(row_num, col_num, cell_data, target_format)
+                                cell_found = True
+                                break
+
+                        if not cell_found:
+                            # Если нет специального формата для ячейки, используем стандартный
+                            worksheet.write(row_num, col_num, cell_data, target_format)
+
+            # Устанавливаем ширину колонок
             for col_num, header in enumerate(headers):
-                worksheet.set_column(
-                    col_num, col_num, max(len(str(header)), 10)
-                )
+                # Если указана ширина колонки в column_widths, используем её
+                if col_num < len(column_widths):
+                    width = column_widths[col_num]
+                else:
+                    # Автонастройка ширины колонки на основе заголовка
+                    width = max(len(str(header)), 10)
+
+                worksheet.set_column(col_num, col_num, width)
 
     def _create_format(self, format_dict: dict):
         """Создает формат XLSX из словаря параметров"""
@@ -196,7 +254,54 @@ class XlsxRenderer:
             # индивидуальными параметрами
             del format_copy["border"]
 
-        return self.workbook.add_format(format_copy)
+        # Обработка параметра valign (вертикальное выравнивание)
+        if "valign" in format_copy:
+            valign_value = format_copy["valign"]
+            if valign_value in ["top", "vcenter", "bottom"]:
+                format_copy["valign"] = valign_value
+            else:
+                del format_copy["valign"]  # Удаляем некорректное значение
+
+        # Обработка параметра align (горизонтальное выравнивание)
+        if "align" in format_copy:
+            align_value = format_copy["align"]
+            if align_value in ["left", "center", "right"]:
+                format_copy["align"] = align_value
+            else:
+                del format_copy["align"]  # Удаляем некорректное значение
+
+        # Обработка параметра text_wrap (перенос текста)
+        if "text_wrap" in format_copy:
+            format_copy["text_wrap"] = bool(format_copy["text_wrap"])
+
+        # Обработка числового формата
+        if "num_format" in format_copy:
+            # Просто оставляем как есть, xlsxwriter сам обработает
+            pass
+
+        # Обработка других параметров, игнорируя неизвестные
+        # Создаем список известных параметров
+        known_params = {
+            'align', 'valign', 'bold', 'italic', 'underline', 'font_strikeout',
+            'font_script', 'font_outline', 'font_shadow', 'font_family',
+            'font_size', 'font_color', 'bg_color', 'fg_color', 'pattern',
+            'border', 'border_color', 'top', 'bottom', 'left', 'right',
+            'top_color', 'bottom_color', 'left_color', 'right_color',
+            'text_wrap', 'rotation', 'indent', 'shrink', 'merge_range',
+            'center_across', 'reading_order', 'num_format', 'locked',
+            'hidden', 'align_vertical'
+        }
+
+        # Удаляем неизвестные параметры, чтобы избежать ошибок
+        unknown_params = set(format_copy.keys()) - known_params
+        for param in unknown_params:
+            del format_copy[param]
+
+        try:
+            return self.workbook.add_format(format_copy)
+        except Exception:
+            # Если формат некорректен, возвращаем None
+            return None
 
 
 def check_user_wants_xlsx_format(user_message):

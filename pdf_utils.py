@@ -9,6 +9,8 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+# from reportlab.platypus.doctemplate import BaseDocTemplate, PageTemplate
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -24,6 +26,148 @@ import reportlab.lib.colors as colors_module
 
 # Создаем объект изображения для ReportLab
 from reportlab.platypus import Image as RLImage
+
+# Константы для размера страницы
+DEFAULT_PAGE_SIZE = A4
+
+# Константы для полей страницы
+PAGE_LEFT_MARGIN = 20 * mm
+PAGE_RIGHT_MARGIN = 10 * mm
+PAGE_TOP_MARGIN = 15 * mm
+PAGE_BOTTOM_MARGIN = 15 * mm
+
+
+def draw_header_footer(canvas, doc, header_info=None, footer_info=None):
+    """Функция для рисования колонтитулов на странице"""
+    canvas.saveState()
+
+    # Рисуем верхний колонтитул
+    if header_info:
+        header_text = header_info.get("text", "")
+        font_name = header_info.get("font_name", CYRILLIC_FONT)
+        font_size = header_info.get("font_size", 10)
+        color = header_info.get("color", "black")
+        alignment = header_info.get("alignment", "left")
+
+        # Нормализуем имя шрифта
+        font_name = normalize_font_name(font_name)
+
+        # Создаем стиль для колонтитула
+        header_style = ParagraphStyle(
+            "HeaderStyle",
+            parent=getSampleStyleSheet()["Normal"],
+            fontName=font_name,
+            fontSize=font_size,
+        )
+
+        # Определяем выравнивание
+        alignment_val = TA_LEFT
+        if alignment == "center":
+            alignment_val = TA_CENTER
+        elif alignment == "right":
+            alignment_val = TA_RIGHT
+        elif alignment == "justify":
+            alignment_val = (
+                TA_LEFT  # ReportLab не поддерживает justify напрямую
+            )
+
+        header_style.alignment = alignment_val
+
+        # Применяем цвет, если указан
+        if color:
+            header_style.textColor = parse_color(color)
+
+        # Создаем параграф с текстом колонтитула
+        header_para = Paragraph(header_text, header_style)
+
+        # Определяем позицию - чуть ниже верхнего края страницы
+        y_position = (
+            doc.height + doc.topMargin - 20
+        )  # 20 points от верхнего края
+        x_position = doc.leftMargin
+
+        # Рисуем колонтитул
+        w, h = header_para.wrap(doc.width, doc.height)  # Получаем размеры
+        header_para.drawOn(canvas, x_position, y_position - h)
+
+    # Рисуем нижний колонтитул
+    if footer_info:
+        footer_text = footer_info.get("text", "")
+
+        # Заменяем теги номера страницы на реальный номер страницы
+        # Поддерживаемые теги: {page}, {pageNumber}, {current_page}
+        import re
+
+        # Получаем номер текущей страницы из канваса
+        page_number = canvas.getPageNumber()
+        footer_text = re.sub(
+            r"\{page\}|\{pageNumber\}|\{current_page\}",
+            str(page_number),
+            footer_text,
+        )
+
+        font_name = footer_info.get("font_name", CYRILLIC_FONT)
+        font_size = footer_info.get("font_size", 10)
+        color = footer_info.get("color", "black")
+        alignment = footer_info.get("alignment", "left")
+
+        # Нормализуем имя шрифта
+        font_name = normalize_font_name(font_name)
+
+        # Создаем стиль для колонтитула
+        footer_style = ParagraphStyle(
+            "FooterStyle",
+            parent=getSampleStyleSheet()["Normal"],
+            fontName=font_name,
+            fontSize=font_size,
+        )
+
+        # Определяем выравнивание
+        alignment_val = TA_LEFT
+        if alignment == "center":
+            alignment_val = TA_CENTER
+        elif alignment == "right":
+            alignment_val = TA_RIGHT
+        elif alignment == "justify":
+            alignment_val = (
+                TA_LEFT  # ReportLab не поддерживает justify напрямую
+            )
+
+        footer_style.alignment = alignment_val
+
+        # Применяем цвет, если указан
+        if color:
+            footer_style.textColor = parse_color(color)
+
+        # Создаем параграф с текстом колонтитула
+        footer_para = Paragraph(footer_text, footer_style)
+
+        # Определяем позицию - чуть выше нижнего края страницы
+        y_position = 20  # 20 points от нижнего края
+        x_position = doc.leftMargin
+
+        # Рисуем колонтитул
+        w, h = footer_para.wrap(doc.width, doc.height)  # Получаем размеры
+        footer_para.drawOn(canvas, x_position, y_position)
+
+    canvas.restoreState()
+
+
+class CustomDocTemplate(SimpleDocTemplate):
+    """Кастомный документ с поддержкой колонтитулов"""
+
+    def __init__(self, filename, header_info=None, footer_info=None, **kwargs):
+        super().__init__(filename, **kwargs)
+        self.header_info = header_info
+        self.footer_info = footer_info
+
+        # Устанавливаем функции для колонтитулов
+        self.onFirstPage = lambda canvas, doc: draw_header_footer(
+            canvas, doc, header_info, footer_info
+        )
+        self.onLaterPages = lambda canvas, doc: draw_header_footer(
+            canvas, doc, header_info, footer_info
+        )
 
 
 def parse_color(color_value):
@@ -55,7 +199,7 @@ def parse_color(color_value):
                 )  # Умножаем на 17 для расширения 0-F до 0-255
             elif len(hex_color) == 6:
                 # Полный формат (RRGGBB)
-                rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+                rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
             else:
                 raise ValueError(
                     f"Неподдерживаемый формат HEX цвета: {color_value}"
@@ -85,7 +229,13 @@ JSON_SCHEMA_PDF = """
     Верни ТОЛЬКО валидный JSON без пояснений.
     Строгая схема:
     {
-    "meta": {"title": "string"},
+    "meta": {"title": "string", "page_size": "A4",
+             "header": {"text": "string", "font_name": "string",
+             "font_size": 12, "color": "string", "alignment": "left"},
+             "footer": {"text": "string (используйте {page},
+             {pageNumber} или {current_page} для номера страницы)",
+             "font_name": "string", "font_size": 12,
+             "color": "string", "alignment": "left"}},
     "blocks": [
         {"type":"heading","level":1,"text":"string",
         "font_name":"string", "font_size":12, "color":"string"},
@@ -101,19 +251,42 @@ JSON_SCHEMA_PDF = """
            "params": {
                "header_font_name":"CyrillicFont-Bold",
                "header_font_size":10,
+               "header_color":"string",
+               "header_bg_color":"string",
+               "header_alignment":"center",
+               "header_valign":"middle",
                "body_font_name":"string",
                "body_font_size":9,
+               "body_color":"string",
+               "body_bg_color":"string",
+               "body_alignment":"left",
+               "body_valign":"middle",
                "grid_width":0.5,
                "grid_color":"black",
-               "header_bg_color":"cyan",
-               "header_text_color":"black",
                "align":"LEFT",
                "valign":"TOP",
                "padding_top":6,
                "padding_bottom":6,
                "body_padding_top":4,
                "body_padding_bottom":4
-           }
+           },
+           "column_widths": [100, 150, 200],
+           "cell_properties": [
+               {
+                   "row": 0,  # или "last", "first", "header" для спец значений
+                   "col": 0,
+                   "bg_color": "yellow",
+                   "text_color": "black",
+                   "font_name": "CyrillicFont-Bold",
+                   "font_size": 12,
+                   "alignment": "center",
+                   "valign": "middle",
+                   "border_width": 1,
+                   "border_color": "black",
+                   "border_style": "solid",
+                   "text_wrap": true
+               }
+           ]
         },
         {"type":"math", "formula":"LaTeX formula",
         "caption":"optional caption",
@@ -160,13 +333,6 @@ def register_cyrillic_font():
     except (IOError, OSError, RuntimeError):
         # Если не удалось загрузить шрифт, используем стандартный
         return "Helvetica"
-
-
-# Константы для полей страницы
-PAGE_LEFT_MARGIN = 20 * mm
-PAGE_RIGHT_MARGIN = 10 * mm
-PAGE_TOP_MARGIN = 15 * mm
-PAGE_BOTTOM_MARGIN = 15 * mm
 
 
 def clean_html_tags(text):
@@ -249,14 +415,47 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
     # Создаем байтовый поток для PDF
     pdf_buffer = io.BytesIO()
 
-    # Создаем документ с настраиваемыми полями (20 мм со всех сторон)
-    doc = SimpleDocTemplate(
+    # Определяем размер страницы из метаданных
+    meta = data.get("meta", {})
+    page_size_str = meta.get("page_size", "A4").upper()
+
+    # Определяем фактический размер страницы
+    if page_size_str == "A4":
+        page_size = A4
+    elif page_size_str == "LETTER":
+        from reportlab.lib.pagesizes import letter
+
+        page_size = letter
+    elif page_size_str == "LEGAL":
+        from reportlab.lib.pagesizes import legal
+
+        page_size = legal
+    elif page_size_str == "A3":
+        from reportlab.lib.pagesizes import A3
+
+        page_size = A3
+    elif page_size_str == "A5":
+        from reportlab.lib.pagesizes import A5
+
+        page_size = A5
+    else:
+        # Если указан неизвестный формат, используем A4 по умолчанию
+        page_size = DEFAULT_PAGE_SIZE
+
+    # Получаем информацию о колонтитулах
+    header_info = meta.get("header", None)
+    footer_info = meta.get("footer", None)
+
+    # Создаем документ с настраиваемыми полями и поддержкой колонтитулов
+    doc = CustomDocTemplate(
         pdf_buffer,
-        pagesize=A4,
+        pagesize=page_size,
         leftMargin=PAGE_LEFT_MARGIN,
         rightMargin=PAGE_RIGHT_MARGIN,
         topMargin=PAGE_TOP_MARGIN,
         bottomMargin=PAGE_BOTTOM_MARGIN,
+        header_info=header_info,
+        footer_info=footer_info,
     )
 
     # Получаем стили
@@ -306,6 +505,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             text_color = block.get(
                 "color", None
             )  # ReportLab поддерживает цвета
+            bg_color = block.get(
+                "bg_color", None
+            )  # Добавляем поддержку заливки
 
             heading_style = ParagraphStyle(
                 f"CustomHeading{level}",
@@ -323,6 +525,14 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 # Применяем цвет к стилю заголовка
                 heading_style.textColor = parse_color(text_color)
 
+            # Применяем заливку, если она указана
+            if bg_color:
+                try:
+                    heading_style.backColor = parse_color(bg_color)
+                except Exception:
+                    # Игнорируем ошибки при установке заливки
+                    pass
+
             heading = Paragraph(text, heading_style)
             elements.append(heading)
 
@@ -339,6 +549,9 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             space_after = block.get("space_after", 12)
             alignment = block.get("alignment", "left")  # left, center, right
             text_color = block.get("color", None)
+            bg_color = block.get(
+                "bg_color", None
+            )  # Добавляем поддержку заливки
 
             # Определяем выравнивание
             alignment_val = TA_LEFT
@@ -346,6 +559,10 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 alignment_val = TA_CENTER
             elif alignment == "right":
                 alignment_val = TA_RIGHT
+            elif alignment == "justify":
+                alignment_val = (
+                    TA_LEFT  # ReportLab не поддерживает justify напрямую
+                )
 
             paragraph_style = ParagraphStyle(
                 "CustomParagraph",
@@ -358,10 +575,18 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 alignment=alignment_val,
             )
 
-            # Применяем цвет, если он указан
+            # Применяем цвет текста, если он указан
             if text_color:
                 # Применяем цвет к стилю параграфа
                 paragraph_style.textColor = parse_color(text_color)
+
+            # Применяем заливку, если она указана
+            if bg_color:
+                try:
+                    paragraph_style.backColor = parse_color(bg_color)
+                except Exception:
+                    # Игнорируем ошибки при установке заливки
+                    pass
 
             # Применяем форматирование из JSON
             if block.get("bold"):
@@ -386,6 +611,8 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
             left_indent = block.get("left_indent", 0)
             right_indent = block.get("right_indent", 0)
             space_after = block.get("space_after", 12)
+            text_color = block.get("color", None)
+            bg_color = block.get("bg_color", None)
 
             # Создаем стиль для списка
             list_style = ParagraphStyle(
@@ -397,6 +624,18 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 rightIndent=right_indent,
                 fontName=font_name,
             )
+
+            # Применяем цвет текста, если он указан
+            if text_color:
+                list_style.textColor = parse_color(text_color)
+
+            # Применяем заливку, если она указана
+            if bg_color:
+                try:
+                    list_style.backColor = parse_color(bg_color)
+                except Exception:
+                    # Игнорируем ошибки при установке заливки
+                    pass
 
             for item in items:
                 bullet = (
@@ -418,25 +657,33 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 header_font_name
             )  # Нормализуем имя шрифта
             header_font_size = table_params.get("header_font_size", 10)
+            header_color = table_params.get("header_color", "black")
+            header_bg_color = table_params.get("header_bg_color", "lightgrey")
+            header_alignment = table_params.get("header_alignment", "center")
+            header_valign = table_params.get("header_valign", "middle")
+
             body_font_name = table_params.get("body_font_name", CYRILLIC_FONT)
             body_font_name = normalize_font_name(
                 body_font_name
             )  # Нормализуем имя шрифта
             body_font_size = table_params.get("body_font_size", 9)
+            body_color = table_params.get("body_color", "black")
+            body_bg_color = table_params.get("body_bg_color", "white")
+            body_alignment = table_params.get("body_alignment", "left")
+            body_valign = table_params.get("body_valign", "middle")
+
             grid_width = table_params.get("grid_width", 0.5)
             grid_color = parse_color(table_params.get("grid_color", "black"))
-            header_bg_color = parse_color(
-                table_params.get("header_bg_color", "gray")
-            )
-            header_text_color = parse_color(
-                table_params.get("header_text_color", "whitesmoke")
-            )
             align = table_params.get("align", "LEFT")
             valign = table_params.get("valign", "TOP")
             padding_top = table_params.get("padding_top", 6)
             padding_bottom = table_params.get("padding_bottom", 6)
             body_padding_top = table_params.get("body_padding_top", 4)
             body_padding_bottom = table_params.get("body_padding_bottom", 4)
+
+            # Получаем дополнительные параметры
+            column_widths = block.get("column_widths", [])
+            cell_properties = block.get("cell_properties", [])
 
             if headers and rows:
                 # Подготовим данные таблицы с учетом переноса текста
@@ -475,138 +722,244 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                 # Создаем таблицу с обработанными данными
                 table = Table(processed_table_data)
 
-                # Устанавливаем максимальную ширину таблицы
-                # равной ширине страницы минус отступы
-                available_width = (
-                    A4[0] - PAGE_LEFT_MARGIN - PAGE_RIGHT_MARGIN
-                )  # ширина A4 минус левое и правое поля
-
-                # Определяем количество столбцов
-                num_cols = (
-                    len(headers) if headers else len(rows[0]) if rows else 0
+                # Устанавливаем ширину столбцов, если указана
+                # Добавляем небольшой отступ от краев страницы
+                margin_buffer = 10  # 10 points отступа с каждой стороны
+                base_available_width = (
+                    page_size[0] - PAGE_LEFT_MARGIN - PAGE_RIGHT_MARGIN
+                )
+                # Уменьшаем доступную ширину на отступы
+                adjusted_available_width = (
+                    base_available_width - 2 * margin_buffer
                 )
 
-                if num_cols > 0:
-                    # Рассчитываем приблизительную ширину для каждого столбца
-                    # на основе длины текста в заголовках
-                    # и первых строках данных
-                    col_widths = []
+                if column_widths:
+                    # Убедимся, что количество ширин
+                    # соответствует количеству столбцов
+                    if len(column_widths) == len(headers):
+                        # Проверяем, что общая ширина не превышает доступную
+                        total_width = sum(column_widths)
+                        if total_width > adjusted_available_width:
+                            # Масштабируем ширину столбцов
+                            scale_factor = (
+                                adjusted_available_width / total_width
+                            )
+                            scaled_widths = [
+                                w * scale_factor for w in column_widths
+                            ]
+                            table._argW = scaled_widths
+                        else:
+                            table._argW = [w for w in column_widths]
+                    else:
+                        # Если количество ширин не совпадает,
+                        # используем стандартный расчет
+                        num_cols = len(headers)
+                        if num_cols > 0:
+                            col_widths = [
+                                adjusted_available_width / num_cols
+                            ] * num_cols
+                            table._argW = col_widths
+                else:
+                    # Стандартный расчет ширины столбцов
+                    num_cols = len(headers)
+                    if num_cols > 0:
+                        col_widths = [
+                            adjusted_available_width / num_cols
+                        ] * num_cols
+                        table._argW = col_widths
 
-                    for col_idx in range(num_cols):
-                        # Определяем максимальную длину текста в столбце
-                        # (заголовок + первые несколько строк данных)
-                        max_text_length = 0
+                # Создаем стиль таблицы
+                table_style_commands = [
+                    ("ALIGN", (0, 0), (-1, -1), align),
+                    ("VALIGN", (0, 0), (-1, -1), valign),
+                    ("GRID", (0, 0), (-1, -1), grid_width, grid_color),
+                    ("FONTNAME", (0, 0), (-1, 0), header_font_name),
+                    ("FONTSIZE", (0, 0), (-1, 0), header_font_size),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), padding_bottom),
+                    ("TOPPADDING", (0, 0), (-1, 0), padding_top),
+                    ("FONTNAME", (0, 1), (-1, -1), body_font_name),
+                    ("FONTSIZE", (0, 1), (-1, -1), body_font_size),
+                    ("BOTTOMPADDING", (0, 1), (-1, -1), body_padding_bottom),
+                    ("TOPPADDING", (0, 1), (-1, -1), body_padding_top),
+                    (
+                        "BACKGROUND",
+                        (0, 0),
+                        (-1, 0),
+                        parse_color(header_bg_color),
+                    ),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), parse_color(header_color)),
+                    ("ALIGN", (0, 0), (-1, 0), header_alignment.upper()),
+                    ("VALIGN", (0, 0), (-1, 0), header_valign.upper()),
+                    (
+                        "BACKGROUND",
+                        (0, 1),
+                        (-1, -1),
+                        parse_color(body_bg_color),
+                    ),
+                    ("TEXTCOLOR", (0, 1), (-1, -1), parse_color(body_color)),
+                    ("ALIGN", (0, 1), (-1, -1), body_alignment.upper()),
+                    ("VALIGN", (0, 1), (-1, -1), body_valign.upper()),
+                ]
 
-                        # Проверяем заголовок
-                        if col_idx < len(headers):
-                            max_text_length = max(
-                                max_text_length, len(str(headers[col_idx]))
+                # Применяем индивидуальные свойства ячеек
+                for cell_prop in cell_properties:
+                    try:
+                        row_val = cell_prop.get("row", 0)
+                        col_idx = cell_prop.get("col", 0)
+
+                        # Обработка специальных значений индекса строки
+                        if isinstance(row_val, str):
+                            if row_val == "last":
+                                # Используем индекс последней строки данных
+                                # (учитывая, что 0 - заголовки)
+                                row_idx = len(
+                                    rows
+                                )
+                            elif row_val == "first":
+                                row_idx = 1
+                            elif row_val == "header":
+                                row_idx = 0  # Строка заголовков
+                            else:
+                                # Если строковое значение не распознано,
+                                # используем 0 по умолчанию
+                                row_idx = 0
+                        else:
+                            # Если значение числовое, используем как есть
+                            row_idx = int(row_val)
+
+                        # Убедимся, что индекс строки в допустимом диапазоне
+                        # 0 - заголовки, 1..len(rows) - строки данных
+                        max_valid_index = len(
+                            rows
+                        )  # максимальный допустимый индекс для строк данных
+                        if row_idx < 0:
+                            row_idx = 0
+                        elif row_idx > max_valid_index:
+                            row_idx = max_valid_index
+
+                        # Применяем заливку ячейки
+                        if "bg_color" in cell_prop:
+                            bg_color = parse_color(cell_prop["bg_color"])
+                            table_style_commands.append(
+                                (
+                                    "BACKGROUND",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    bg_color,
+                                )
                             )
 
-                        # Проверяем первые несколько строк данных
-                        # (ограничимся 5 строками для производительности)
-                        for row_idx in range(min(5, len(rows))):
-                            if col_idx < len(rows[row_idx]):
-                                max_text_length = max(
-                                    max_text_length,
-                                    len(str(rows[row_idx][col_idx])),
+                        # Применяем цвет текста
+                        if "text_color" in cell_prop:
+                            text_color = parse_color(cell_prop["text_color"])
+                            table_style_commands.append(
+                                (
+                                    "TEXTCOLOR",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    text_color,
                                 )
+                            )
 
-                        # Устанавливаем ширину пропорционально длине текста
-                        # Минимальная ширина - 1/num_cols от доступной ширины
-                        # Максимальная ширина - пропорционально длине текста,
-                        # но не больше 0.4 от всей ширины
-                        col_width = min(
-                            available_width * 0.4,
-                            max(
-                                available_width / num_cols, max_text_length * 3
-                            ),
-                        )  # примерный коэффициент
-                        col_widths.append(col_width)
+                        # Применяем шрифт
+                        if "font_name" in cell_prop:
+                            font_name = normalize_font_name(
+                                cell_prop["font_name"]
+                            )
+                            table_style_commands.append(
+                                (
+                                    "FONTNAME",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    font_name,
+                                )
+                            )
 
-                    # Нормализуем ширину, чтобы общая ширина
-                    # не превышала доступную
-                    total_width = sum(col_widths)
-                    if total_width > available_width:
-                        # Масштабируем ширину столбцов
-                        scale_factor = available_width / total_width
-                        col_widths = [
-                            width * scale_factor for width in col_widths
-                        ]
+                        # Применяем размер шрифта
+                        if "font_size" in cell_prop:
+                            font_size = cell_prop["font_size"]
+                            table_style_commands.append(
+                                (
+                                    "FONTSIZE",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    font_size,
+                                )
+                            )
 
-                    table._argW = col_widths
+                        # Применяем выравнивание
+                        if "alignment" in cell_prop:
+                            alignment = cell_prop["alignment"].upper()
+                            table_style_commands.append(
+                                (
+                                    "ALIGN",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    alignment,
+                                )
+                            )
 
-                # Применяем стиль к таблице с параметрами из JSON
-                table.setStyle(
-                    TableStyle(
-                        [
-                            (
-                                "ALIGN",
-                                (0, 0),
-                                (-1, -1),
-                                align,
-                            ),  # Выравнивание из JSON
-                            (
-                                "FONTNAME",
-                                (0, 0),
-                                (-1, 0),
-                                header_font_name,
-                            ),  # Шрифт для первой строки из JSON
-                            (
-                                "FONTSIZE",
-                                (0, 0),
-                                (-1, 0),
-                                header_font_size,
-                            ),  # Размер шрифта для заголовков из JSON
-                            ("BOTTOMPADDING", (0, 0), (-1, 0), padding_bottom),
-                            ("TOPPADDING", (0, 0), (-1, 0), padding_top),
-                            (
-                                "BOTTOMPADDING",
-                                (0, 1),
-                                (-1, -1),
-                                body_padding_bottom,
-                            ),
-                            ("TOPPADDING", (0, 1), (-1, -1), body_padding_top),
-                            (
-                                "FONTNAME",
-                                (0, 1),
-                                (-1, -1),
-                                body_font_name,
-                            ),  # Шрифт для остальных строк из JSON
-                            (
-                                "FONTSIZE",
-                                (0, 1),
-                                (-1, -1),
-                                body_font_size,
-                            ),  # Размер шрифта для остальных строк из JSON
-                            (
-                                "GRID",
-                                (0, 0),
-                                (-1, -1),
-                                grid_width,
-                                grid_color,
-                            ),  # Параметры сетки из JSON
-                            (
-                                "VALIGN",
-                                (0, 0),
-                                (-1, -1),
-                                valign,
-                            ),  # Выравнивание по вертикали из JSON
-                            (
-                                "BACKGROUND",
-                                (0, 0),
-                                (-1, 0),
-                                header_bg_color,
-                            ),  # Цвет фона заголовка из JSON
-                            (
-                                "TEXTCOLOR",
-                                (0, 0),
-                                (-1, 0),
-                                header_text_color,
-                            ),  # Цвет текста заголовка из JSON
-                        ]
-                    )
-                )
+                        # Применяем вертикальное выравнивание
+                        if "valign" in cell_prop:
+                            valign = cell_prop["valign"].upper()
+                            table_style_commands.append(
+                                (
+                                    "VALIGN",
+                                    (col_idx, row_idx),
+                                    (col_idx, row_idx),
+                                    valign,
+                                )
+                            )
+
+                        # Применяем границы
+                        if (
+                            "border_width" in cell_prop
+                            and "border_color" in cell_prop
+                        ):
+                            border_width = cell_prop["border_width"]
+                            border_color = parse_color(
+                                cell_prop["border_color"]
+                            )
+
+                            # Применяем границы ко всем сторонам
+                            table_style_commands.extend(
+                                [
+                                    (
+                                        "LINEABOVE",
+                                        (col_idx, row_idx),
+                                        (col_idx, row_idx),
+                                        border_width,
+                                        border_color,
+                                    ),
+                                    (
+                                        "LINEBELOW",
+                                        (col_idx, row_idx),
+                                        (col_idx, row_idx),
+                                        border_width,
+                                        border_color,
+                                    ),
+                                    (
+                                        "LINELEFT",
+                                        (col_idx, row_idx),
+                                        (col_idx, row_idx),
+                                        border_width,
+                                        border_color,
+                                    ),
+                                    (
+                                        "LINERIGHT",
+                                        (col_idx, row_idx),
+                                        (col_idx, row_idx),
+                                        border_width,
+                                        border_color,
+                                    ),
+                                ]
+                            )
+                    except Exception:
+                        # Игнорируем ошибки при применении свойств ячейки
+                        pass
+
+                # Применяем стиль к таблице
+                table.setStyle(TableStyle(table_style_commands))
 
                 elements.append(table)
                 elements.append(Spacer(1, 12))

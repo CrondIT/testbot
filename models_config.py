@@ -17,6 +17,7 @@ client_chat = OpenAI(api_key=OPENAI_API_KEY_CHAT)
 client_image = OpenAI(api_key=OPENAI_API_KEY_IMAGE)
 # Инициализация клиента Gemini
 client_edit_image = genai.Client(api_key=GEMINI_API_KEY)
+# print(list(client_edit_image.models.list()))
 
 
 async def get_gemini_models_info() -> str:
@@ -27,6 +28,7 @@ async def get_gemini_models_info() -> str:
     try:
         models = client_edit_image.models.list()
         lines = ["🤖 Доступные модели Gemini:\n"]
+        print(models)
 
         for model in models:
             # Имя модели теперь в атрибуте 'name'

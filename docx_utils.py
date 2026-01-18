@@ -89,7 +89,31 @@ JSON_SCHEMA = """
                "body_color":"string",
                "table_style":"Table Grid",
                "header_bg_color":"string"
-           }
+           },
+           "table_properties": {
+               "border": {"style":"single", "size":4, "color":"auto"},
+               "cell_margin": {"top": 100, "bottom": 100, "left": 100, "right": 100},
+               "widths": [2000, 3000]  // Ширина столбцов в TWIP (1/20 пункта)
+           },
+           "cell_properties": [
+               {
+                   "row": 0,
+                   "col": 0,
+                   "bg_color": "#D3D3D3",
+                   "text_color": "#000000",
+                   "text_wrap": true,
+                   "vertical_alignment": "center",
+                   "horizontal_alignment": "center",
+                   "border": {"top": {"style":"single", "size":4, "color":"auto"}}
+               }
+           ],
+           "row_properties": [
+               {
+                   "row": 1,
+                   "bg_color": "#F0F0F0",
+                   "text_color": "#333333"
+               }
+           ]
         },
         {"type":"math", "formula":"LaTeX formula",
         "caption":"optional caption", "font_name":"string",
@@ -357,11 +381,49 @@ class DocxRenderer:
         table_style = table_params.get("table_style", "Table Grid")
         header_bg_color = table_params.get("header_bg_color", None)
 
+        # Дополнительные параметры таблицы
+        table_properties = block.get("table_properties", {})
+        cell_properties_list = block.get("cell_properties", [])
+        row_properties_list = block.get("row_properties", [])
+
         if not headers or not rows:
             return  # Пустая таблица — ничего не делаем
 
         table = self.doc.add_table(rows=1, cols=len(headers))
         table.style = table_style  # стиль таблицы из JSON
+
+        # Устанавливаем ширину столбцов, если указана
+        if "widths" in table_properties and table_properties["widths"]:
+            widths = table_properties["widths"]
+            for i, width_val in enumerate(widths):
+                if i < len(table.columns):
+                    try:
+                        # Преобразуем TWIP в Inches (1 TWIP = 1/1440 дюйма)
+                        from docx.shared import Inches
+                        table.columns[i].width = Inches(width_val / 1440.0)
+                    except (TypeError, ValueError):
+                        # Игнорируем ошибки при установке ширины столбца
+                        pass
+
+        # Устанавливаем отступы ячеек, если указаны
+        cell_margin = table_properties.get("cell_margin", {})
+        if cell_margin:
+            for row in table.rows:
+                for cell in row.cells:
+                    tc = cell._tc
+                    tcPr = tc.get_or_add_tcPr()
+
+                    # Устанавливаем отступы
+                    tc_mar = OxmlElement("w:tcMar")
+
+                    for margin_type, margin_value in cell_margin.items():
+                        margin_elem = OxmlElement(f"w:{margin_type}")
+                        margin_elem.set(qn("w:w"), str(margin_value))
+                        margin_elem.set(qn("w:type"), "dxa")
+                        tc_mar.append(margin_elem)
+
+                    tcPr.append(tc_mar)
+
         # Заголовки
         hdr_cells = table.rows[0].cells
         for i, header in enumerate(headers):
@@ -414,11 +476,48 @@ class DocxRenderer:
                 tc.get_or_add_tcPr().append(tcFill)
 
         # Данные
-        for row in rows:
+        for row_idx, row in enumerate(rows):
             cells = table.add_row().cells
-            for i, value in enumerate(row):
+            # Применяем свойства строки, если они определены
+            for row_prop in row_properties_list:
+                if row_prop.get("row") == row_idx + 1:  # +1 потому что 0-й ряд - заголовки
+                    # Применяем заливку ко всей строке
+                    if "bg_color" in row_prop:
+                        bg_color = row_prop["bg_color"]
+                        if bg_color.startswith("#"):
+                            bg_color = bg_color[1:]  # Убираем #
+
+                        for cell in cells:
+                            tc = cell._tc
+                            tcPr = tc.get_or_add_tcPr()
+
+                            # Создаем элемент заливки
+                            tc_fill = OxmlElement("w:shd")
+                            tc_fill.set(qn("w:fill"), bg_color)
+                            tcPr.append(tc_fill)
+
+                    # Применяем цвет текста ко всей строке
+                    if "text_color" in row_prop:
+                        text_color = row_prop["text_color"]
+                        if text_color.startswith("#"):
+                            text_color = text_color[1:]  # Убираем #
+
+                        from docx.shared import RGBColor
+                        if len(text_color) == 6:
+                            r = int(text_color[0:2], 16)
+                            g = int(text_color[2:4], 16)
+                            b = int(text_color[4:6], 16)
+                            rgb_color = RGBColor(r, g, b)
+
+                            # Применяем цвет ко всем ячейкам в строке
+                            for cell in cells:
+                                for paragraph in cell.paragraphs:
+                                    for run in paragraph.runs:
+                                        run.font.color.rgb = rgb_color
+
+            for col_idx, value in enumerate(row):
                 cleaned_value = clean_html_tags(str(value))
-                cells[i].text = cleaned_value
+                cells[col_idx].text = cleaned_value
 
                 # Применяем стили к ячейкам данных
                 if (
@@ -429,9 +528,9 @@ class DocxRenderer:
                     or body_color
                 ):
                     run = (
-                        cells[i].paragraphs[0].runs[0]
-                        if cells[i].paragraphs and cells[i].paragraphs[0].runs
-                        else cells[i].paragraphs[0].add_run(cleaned_value)
+                        cells[col_idx].paragraphs[0].runs[0]
+                        if cells[col_idx].paragraphs and cells[col_idx].paragraphs[0].runs
+                        else cells[col_idx].paragraphs[0].add_run(cleaned_value)
                     )
                     if body_font_name:
                         run.font.name = body_font_name
@@ -452,6 +551,133 @@ class DocxRenderer:
                             g = int(body_color[2:4], 16)
                             b = int(body_color[4:6], 16)
                             run.font.color.rgb = RGBColor(r, g, b)
+
+                # Применяем индивидуальные свойства ячейки
+                for cell_prop in cell_properties_list:
+                    if cell_prop.get("row") == row_idx + 1 and cell_prop.get("col") == col_idx:  # +1 потому что 0-й ряд - заголовки
+                        self._apply_cell_properties(cells[col_idx], cell_prop)
+
+    def _apply_cell_properties(self, cell, properties):
+        """
+        Применяет свойства к отдельной ячейке
+        """
+        try:
+            # Применяем заливку ячейки
+            if "bg_color" in properties:
+                bg_color = properties["bg_color"]
+                if bg_color.startswith("#"):
+                    bg_color = bg_color[1:]  # Убираем #
+
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+
+                # Создаем элемент заливки
+                tc_fill = OxmlElement("w:shd")
+                tc_fill.set(qn("w:fill"), bg_color)
+                tcPr.append(tc_fill)
+
+            # Применяем перенос текста
+            # В Word по умолчанию текст переносится, поэтому если text_wrap=true, ничего не делаем
+            # Если text_wrap=false, тогда отключаем перенос
+            if "text_wrap" in properties and not properties["text_wrap"]:
+                # Отключаем перенос текста
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+
+                # Устанавливаем noWrap для отключения переноса
+                no_wrap = OxmlElement("w:noWrap")
+                tcPr.append(no_wrap)
+
+            # Применяем выравнивание
+            if "vertical_alignment" in properties:
+                vertical_alignment = properties["vertical_alignment"]
+                tc = cell._tc
+                tcPr = tc.get_or_add_tcPr()
+
+                # Устанавливаем вертикальное выравнивание
+                v_align = OxmlElement("w:vAlign")
+                if vertical_alignment == "top":
+                    v_align.set(qn("w:val"), "top")
+                elif vertical_alignment == "center":
+                    v_align.set(qn("w:val"), "center")
+                elif vertical_alignment == "bottom":
+                    v_align.set(qn("w:val"), "bottom")
+                else:
+                    v_align.set(qn("w:val"), "center")  # по умолчанию
+
+                tcPr.append(v_align)
+
+            # Применяем цвет текста
+            if "text_color" in properties:
+                text_color = properties["text_color"]
+                if text_color.startswith("#"):
+                    text_color = text_color[1:]  # Убираем #
+
+                # Применяем цвет ко всем параграфам в ячейке
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        from docx.shared import RGBColor
+                        if len(text_color) == 6:
+                            r = int(text_color[0:2], 16)
+                            g = int(text_color[2:4], 16)
+                            b = int(text_color[4:6], 16)
+                            run.font.color.rgb = RGBColor(r, g, b)
+
+            # Применяем горизонтальное выравнивание
+            if "horizontal_alignment" in properties:
+                horizontal_alignment = properties["horizontal_alignment"]
+                p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+
+                if horizontal_alignment == "left":
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                elif horizontal_alignment == "center":
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                elif horizontal_alignment == "right":
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                elif horizontal_alignment == "justify":
+                    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+            # Применяем границы
+            if "border" in properties:
+                border_props = properties["border"]
+                self._apply_border_to_cell(cell, border_props)
+        except Exception:
+            # Игнорируем ошибки при применении свойств ячейки
+            pass
+
+    def _apply_border_to_cell(self, cell, border_props):
+        """
+        Применяет границы к ячейке
+        """
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+
+        # Обрабатываем каждую границу
+        for border_side in ["top", "bottom", "left", "right", "insideH", "insideV", "all"]:
+            if border_side in border_props:
+                border_info = border_props[border_side]
+
+                # Проверяем, что border_info - это словарь
+                if not isinstance(border_info, dict):
+                    continue
+
+                # Создаем элемент границы
+                border_elem = OxmlElement(f"w:{border_side}")
+
+                # Устанавливаем стиль границы
+                style = border_info.get("style", "single")
+                border_elem.set(qn("w:val"), str(style))
+
+                # Устанавливаем размер границы (в EIGHT_POINTS)
+                size = border_info.get("size", 4)  # по умолчанию 4 = 0.5pt
+                border_elem.set(qn("w:sz"), str(size))
+
+                # Устанавливаем цвет границы
+                color = border_info.get("color", "auto")
+                border_elem.set(qn("w:color"), str(color))
+
+                # Добавляем границу к свойствам ячейки
+                tcPr.append(border_elem)
 
     def _math(self, block: dict):
         """
