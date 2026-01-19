@@ -18,7 +18,7 @@ def get_token_limit(model_name: str) -> int:
         # DALL-E models
         "dall-e-3": 4096,  # Prompt length limit
         # Gemini models
-        "models/gemini-2.5-flash-image": 32768,
+        "imagen-4.0-generate-001": 8192,
         "gemini-2.5-pro": 2097152,
         "gemini-2.5-flash-image": 32768,
         "gemini-1.5-pro": 1048576,

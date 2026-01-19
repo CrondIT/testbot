@@ -33,13 +33,23 @@ DEFAULT_PAGE_SIZE = A4
 # Константы для полей страницы
 PAGE_LEFT_MARGIN = 20 * mm
 PAGE_RIGHT_MARGIN = 10 * mm
-PAGE_TOP_MARGIN = 15 * mm
-PAGE_BOTTOM_MARGIN = 15 * mm
+PAGE_TOP_MARGIN = 20 * mm
+PAGE_BOTTOM_MARGIN = 20 * mm
+
+# Константы для отступов колонтитулов (в миллиметрах)
+HEADER_TOP_MARGIN = 10 * mm  # отступ от верхнего края страницы (в мм)
+FOOTER_BOTTOM_MARGIN = 10 * mm  # отступ от нижнего края страницы (в мм)
 
 
 def draw_header_footer(canvas, doc, header_info=None, footer_info=None):
     """Функция для рисования колонтитулов на странице"""
     canvas.saveState()
+
+    # Используем значения по умолчанию, если пользователь не предоставил свои
+    if header_info is None:
+        header_info = DEFAULT_HEADER_INFO
+    if footer_info is None:
+        footer_info = DEFAULT_FOOTER_INFO
 
     # Рисуем верхний колонтитул
     if header_info:
@@ -82,13 +92,14 @@ def draw_header_footer(canvas, doc, header_info=None, footer_info=None):
 
         # Определяем позицию - чуть ниже верхнего края страницы
         y_position = (
-            doc.height + doc.topMargin - 20
-        )  # 20 points от верхнего края
+            doc.height - HEADER_TOP_MARGIN
+        )  # отступ от верхнего края
+        print("doc.height: ", doc.height, "HEADER_TOP_MARGIN: ", HEADER_TOP_MARGIN, "PAGE_TOP_MARGIN :", PAGE_TOP_MARGIN)
         x_position = doc.leftMargin
 
         # Рисуем колонтитул
         w, h = header_para.wrap(doc.width, doc.height)  # Получаем размеры
-        header_para.drawOn(canvas, x_position, y_position - h)
+        header_para.drawOn(canvas, x_position, doc.height + PAGE_TOP_MARGIN + PAGE_BOTTOM_MARGIN - HEADER_TOP_MARGIN)
 
     # Рисуем нижний колонтитул
     if footer_info:
@@ -143,7 +154,7 @@ def draw_header_footer(canvas, doc, header_info=None, footer_info=None):
         footer_para = Paragraph(footer_text, footer_style)
 
         # Определяем позицию - чуть выше нижнего края страницы
-        y_position = 20  # 20 points от нижнего края
+        y_position = FOOTER_BOTTOM_MARGIN  # отступ от нижнего края
         x_position = doc.leftMargin
 
         # Рисуем колонтитул
@@ -158,6 +169,13 @@ class CustomDocTemplate(SimpleDocTemplate):
 
     def __init__(self, filename, header_info=None, footer_info=None, **kwargs):
         super().__init__(filename, **kwargs)
+
+        # Используем значения по умолчанию, если пользователь не предоставил
+        if header_info is None:
+            header_info = DEFAULT_HEADER_INFO
+        if footer_info is None:
+            footer_info = DEFAULT_FOOTER_INFO
+
         self.header_info = header_info
         self.footer_info = footer_info
 
@@ -373,6 +391,23 @@ CYRILLIC_FONT = register_cyrillic_font()
 # Убедимся, что мы используем правильные имена шрифтов
 CYRILLIC_FONT_BOLD = "CyrillicFont-Bold"
 
+# Константы для колонтитулов по умолчанию
+DEFAULT_HEADER_INFO = {
+    "text": "",
+    "font_name": CYRILLIC_FONT,
+    "font_size": 10,
+    "color": "black",
+    "alignment": "left",
+}
+
+DEFAULT_FOOTER_INFO = {
+    "text": "Страница {page}",
+    "font_name": CYRILLIC_FONT,
+    "font_size": 10,
+    "color": "black",
+    "alignment": "center",
+}
+
 
 def normalize_font_name(font_name):
     """
@@ -468,24 +503,8 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
     styles["Heading3"].fontName = CYRILLIC_FONT
     styles["Italic"].fontName = CYRILLIC_FONT
 
-    title_style = ParagraphStyle(
-        "CustomTitle",
-        parent=styles["Heading1"],
-        fontSize=18,
-        spaceAfter=30,
-        alignment=TA_CENTER,
-        fontName=CYRILLIC_FONT,
-    )
-
     # Список элементов для документа
     elements = []
-
-    # Добавляем заголовок
-    meta = data.get("meta", {})
-    if "title" in meta:
-        title = Paragraph(meta["title"], title_style)
-        elements.append(title)
-        elements.append(Spacer(1, 12))
 
     # Обрабатываем блоки
     for block in data.get("blocks", []):
@@ -812,9 +831,7 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                             if row_val == "last":
                                 # Используем индекс последней строки данных
                                 # (учитывая, что 0 - заголовки)
-                                row_idx = len(
-                                    rows
-                                )
+                                row_idx = len(rows)
                             elif row_val == "first":
                                 row_idx = 1
                             elif row_val == "header":
