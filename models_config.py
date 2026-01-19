@@ -105,7 +105,7 @@ async def ask_gpt51_with_web_search(
             model=MODELS["chat"],
             input=context_history,
             tools=tools,
-            timeout=60,
+            timeout=300,
         )
 
         # Самый простой и безопасный способ получить текст
