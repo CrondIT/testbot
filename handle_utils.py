@@ -10,6 +10,7 @@ import models_config
 import docx_utils
 import xlsx_utils
 import pdf_utils
+import rtf_utils
 import image_edit_utils
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -25,6 +26,7 @@ from message_utils import send_long_message
 from pdf_utils import send_pdf_response
 from docx_utils import send_docx_response
 from xlsx_utils import send_xlsx_response
+from rtf_utils import send_rtf_response
 
 
 def initialize_user_context(user_id: int, current_mode: str):
@@ -55,6 +57,7 @@ async def handle_file_analysis_mode(
     wants_word_format = docx_utils.check_user_wants_word_format(user_message)
     wants_pdf_format = pdf_utils.check_user_wants_pdf_format(user_message)
     wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(user_message)
+    wants_rtf_format = rtf_utils.check_user_wants_rtf_format(user_message)
 
     if wants_word_format:
         user_message = user_message + " " + docx_utils.JSON_SCHEMA
@@ -373,6 +376,9 @@ async def handle_file_analysis_mode(
             elif wants_excel_format:
                 # Создаем PDF файл с ответом
                 await send_xlsx_response(update, reply)
+            elif wants_rtf_format:
+                # Создаем rtf файл с ответом
+                await send_rtf_response(update, reply)
             else:
                 # Проверяем, является ли ответ валидным JSON
                 # с подходящей структурой
@@ -516,7 +522,9 @@ async def handle_image_edit_mode(
         return
 
     # Получаем фото (берем самое высокое разрешение)
-    photo = update.message.photo[-1]  # Последнее фото - с самым высоким разрешением
+    photo = update.message.photo[
+        -1
+    ]  # Последнее фото - с самым высоким разрешением
     file = await context.bot.get_file(photo.file_id)
 
     # Определяем расширение файла
@@ -534,7 +542,7 @@ async def handle_image_edit_mode(
         # Проверяем, есть ли текст запроса от пользователя
         if not user_message.strip():
             await update.message.reply_text(
-                "📝 Пожалуйста, укажите, что именно вы хотите изменить на изображении."
+                "📝 Пожалуйста, укажите, что именно вы хотите изменить."
             )
             os.remove(file_path)
             return
@@ -549,7 +557,9 @@ async def handle_image_edit_mode(
         edited_image_bytes = await editor.edit_image(image_bytes, user_message)
 
         # Сохраняем отредактированное изображение
-        edited_file_path = f"edited_{user_id}_{update.message.message_id}{file_ext}"
+        edited_file_path = (
+            f"edited_{user_id}_{update.message.message_id}{file_ext}"
+        )
         with open(edited_file_path, "wb") as f:
             f.write(edited_image_bytes)
 
@@ -557,12 +567,16 @@ async def handle_image_edit_mode(
         with open(edited_file_path, "rb") as f:
             await update.message.reply_photo(
                 photo=f,
-                caption=f"Изображение отредактировано по запросу: {user_message}"
+                caption=f"Отредактировано по запросу: {user_message}",
             )
 
         # Подсчитываем токены, использованные для запроса
-        model_name = "imagen-4.0-generate-001"  # модель для редактирования изображений
-        token_count = token_utils.token_counter.count_openai_tokens(user_message, model_name)
+        model_name = (
+            "imagen-4.0-generate-001"  # модель для редактирования изображений
+        )
+        token_count = token_utils.token_counter.count_openai_tokens(
+            user_message, model_name
+        )
 
         # Списываем монеты и записываем лог
         spend_coins(
@@ -572,7 +586,7 @@ async def handle_image_edit_mode(
             giftcoins,
             "edit",
             user_message,
-            f"Token usage: {token_count}"  # Сохраняем информацию о токенах в логах
+            f"Token usage: {token_count}",
         )
 
         # Удаляем временные файлы
@@ -587,7 +601,9 @@ async def handle_image_edit_mode(
         # LOGGING ====================
         log_text = f"Ошибка при редактировании изображения: {str(e)}"
         dbbot.log_action(user_id, "edit", log_text, 0, balance)
-        await update.message.reply_text(f"⚠️ Ошибка при редактировании изображения: {str(e)}")
+        await update.message.reply_text(
+            f"⚠️ Ошибка при редактировании изображения: {str(e)}"
+        )
 
 
 async def handle_chat_mode(
@@ -617,12 +633,17 @@ async def handle_chat_mode(
         wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(
             user_message
         )
+        wants_rtf_format = rtf_utils.check_user_wants_rtf_format(
+            user_message
+        )
         if wants_word_format:
             user_message = user_message + " " + docx_utils.JSON_SCHEMA
         elif wants_pdf_format:
             user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
         elif wants_excel_format:
             user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
+        elif wants_rtf_format:
+            user_message = user_message
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
             temp_history = user_contexts[user_id]["chat"] + [
@@ -663,6 +684,9 @@ async def handle_chat_mode(
         elif wants_excel_format:
             # Создаем EXCEL файл с ответом
             await send_xlsx_response(update, reply)
+        elif wants_rtf_format:
+            # Создаем rtf файл с ответом
+            await send_rtf_response(update, reply)
         else:
             # Ответ не имеет подходящей структуры, отправляем как текст
             # Экранируем специальные символы Markdown, чтобы избежать ошибок
@@ -782,7 +806,14 @@ async def handle_message_or_voice(
     # Обработка режима редактирования изображений
     if current_mode == "edit":
         await handle_image_edit_mode(
-            update, context, user_id, user_message, cost, coins, giftcoins, balance
+            update,
+            context,
+            user_id,
+            user_message,
+            cost,
+            coins,
+            giftcoins,
+            balance,
         )
         return
 

@@ -21,7 +21,35 @@ JSON_SCHEMA_EXCEL = """
     Не включай тройные кавычки в значениях.
     Строгая схема:
     {
-    "meta": {"title": "string"},
+    "meta": {"title": "string", "hide_title": false},
+    "header": {
+        "content": "string",
+        "font_name": "string",
+        "font_size": 12,
+        "color": "string",
+        "bold": false,
+        "italic": false,
+        "alignment": "left",
+        "page_number": {
+            "enabled": false,
+            "format": "Page {PAGE} of {NUMPAGES}",
+            "position": "right"
+        }
+    },
+    "footer": {
+        "content": "string",
+        "font_name": "string",
+        "font_size": 12,
+        "color": "string",
+        "bold": false,
+        "italic": false,
+        "alignment": "left",
+        "page_number": {
+            "enabled": false,
+            "format": "Page {PAGE} of {NUMPAGES}",
+            "position": "right"
+        }
+    },
     "sheets": [
         {
             "name": "string",
@@ -155,31 +183,63 @@ class XlsxRenderer:
                             if "total" in additional_formats:
                                 target_format = additional_formats["total"]
 
-                        # Проверяем, есть ли специальный формат для конкретной ячейки
+                        # Проверяем, есть ли специальный формат
+                        # для конкретной ячейки
                         cell_found = False
                         for cell_config in cells_config:
-                            if cell_config.get("row") == row_num and cell_config.get("col") == col_num:
-                                cell_format_props = cell_config.get("format", {})
-                                cell_specific_format = self._create_format(cell_format_props)
+                            if (
+                                cell_config.get("row") == row_num
+                                and cell_config.get("col") == col_num
+                            ):
+                                cell_format_props = cell_config.get(
+                                    "format", {}
+                                )
+                                cell_specific_format = self._create_format(
+                                    cell_format_props
+                                )
 
                                 # Проверяем, содержит ли ячейка формулу
                                 formula = cell_format_props.get("formula")
                                 if formula:
                                     if cell_specific_format:
-                                        worksheet.write_formula(row_num, col_num, formula, cell_specific_format, cell_data)
+                                        worksheet.write_formula(
+                                            row_num,
+                                            col_num,
+                                            formula,
+                                            cell_specific_format,
+                                            cell_data,
+                                        )
                                     else:
-                                        worksheet.write_formula(row_num, col_num, formula, cell_data)
+                                        worksheet.write_formula(
+                                            row_num,
+                                            col_num,
+                                            formula,
+                                            cell_data,
+                                        )
                                 else:
                                     if cell_specific_format:
-                                        worksheet.write(row_num, col_num, cell_data, cell_specific_format)
+                                        worksheet.write(
+                                            row_num,
+                                            col_num,
+                                            cell_data,
+                                            cell_specific_format,
+                                        )
                                     else:
-                                        worksheet.write(row_num, col_num, cell_data, target_format)
+                                        worksheet.write(
+                                            row_num,
+                                            col_num,
+                                            cell_data,
+                                            target_format,
+                                        )
                                 cell_found = True
                                 break
 
                         if not cell_found:
-                            # Если нет специального формата для ячейки, используем стандартный
-                            worksheet.write(row_num, col_num, cell_data, target_format)
+                            # Если нет специального формата для ячейки,
+                            # используем стандартный
+                            worksheet.write(
+                                row_num, col_num, cell_data, target_format
+                            )
 
             # Устанавливаем ширину колонок
             for col_num, header in enumerate(headers):
@@ -218,38 +278,44 @@ class XlsxRenderer:
             # отдельные параметры для каждой стороны
             if border_value == "thin":
                 # Устанавливаем границы для всех сторон
-                format_copy.update({
-                    "top": 1,
-                    "bottom": 1,
-                    "left": 1,
-                    "right": 1,
-                    "top_color": "black",
-                    "bottom_color": "black",
-                    "left_color": "black",
-                    "right_color": "black"
-                })
+                format_copy.update(
+                    {
+                        "top": 1,
+                        "bottom": 1,
+                        "left": 1,
+                        "right": 1,
+                        "top_color": "black",
+                        "bottom_color": "black",
+                        "left_color": "black",
+                        "right_color": "black",
+                    }
+                )
             elif border_value == "medium":
-                format_copy.update({
-                    "top": 2,
-                    "bottom": 2,
-                    "left": 2,
-                    "right": 2,
-                    "top_color": "black",
-                    "bottom_color": "black",
-                    "left_color": "black",
-                    "right_color": "black"
-                })
+                format_copy.update(
+                    {
+                        "top": 2,
+                        "bottom": 2,
+                        "left": 2,
+                        "right": 2,
+                        "top_color": "black",
+                        "bottom_color": "black",
+                        "left_color": "black",
+                        "right_color": "black",
+                    }
+                )
             elif border_value == "thick":
-                format_copy.update({
-                    "top": 3,
-                    "bottom": 3,
-                    "left": 3,
-                    "right": 3,
-                    "top_color": "black",
-                    "bottom_color": "black",
-                    "left_color": "black",
-                    "right_color": "black"
-                })
+                format_copy.update(
+                    {
+                        "top": 3,
+                        "bottom": 3,
+                        "left": 3,
+                        "right": 3,
+                        "top_color": "black",
+                        "bottom_color": "black",
+                        "left_color": "black",
+                        "right_color": "black",
+                    }
+                )
             # Удаляем исходный параметр border, так как он заменен
             # индивидуальными параметрами
             del format_copy["border"]
@@ -282,14 +348,42 @@ class XlsxRenderer:
         # Обработка других параметров, игнорируя неизвестные
         # Создаем список известных параметров
         known_params = {
-            'align', 'valign', 'bold', 'italic', 'underline', 'font_strikeout',
-            'font_script', 'font_outline', 'font_shadow', 'font_family',
-            'font_size', 'font_color', 'bg_color', 'fg_color', 'pattern',
-            'border', 'border_color', 'top', 'bottom', 'left', 'right',
-            'top_color', 'bottom_color', 'left_color', 'right_color',
-            'text_wrap', 'rotation', 'indent', 'shrink', 'merge_range',
-            'center_across', 'reading_order', 'num_format', 'locked',
-            'hidden', 'align_vertical'
+            "align",
+            "valign",
+            "bold",
+            "italic",
+            "underline",
+            "font_strikeout",
+            "font_script",
+            "font_outline",
+            "font_shadow",
+            "font_family",
+            "font_size",
+            "font_color",
+            "bg_color",
+            "fg_color",
+            "pattern",
+            "border",
+            "border_color",
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "top_color",
+            "bottom_color",
+            "left_color",
+            "right_color",
+            "text_wrap",
+            "rotation",
+            "indent",
+            "shrink",
+            "merge_range",
+            "center_across",
+            "reading_order",
+            "num_format",
+            "locked",
+            "hidden",
+            "align_vertical",
         }
 
         # Удаляем неизвестные параметры, чтобы избежать ошибок
@@ -318,14 +412,11 @@ def check_user_wants_xlsx_format(user_message):
     return (
         "xlsx" in message
         or "excel" in message
-        or "таблица" in message
-        or "таблицу" in message
         or "в экселе" in message
         or "в формате excel" in message
         or "в формате xlsx" in message
         or "в формате xls" in message
         or "в формате таблицы" in message
-        or "в виде таблицы" in message
         or "в виде экселя" in message
         or "в виде xlsx" in message
         or "excel документ" in message

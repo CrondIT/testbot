@@ -18,6 +18,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 import io
 import json
+from global_state import DOCUMENT_JSON_SCHEMA
 from telegram import InputFile
 from telegram.helpers import escape_markdown
 from message_utils import send_long_message
@@ -92,14 +93,16 @@ def draw_header_footer(canvas, doc, header_info=None, footer_info=None):
 
         # Определяем позицию - чуть ниже верхнего края страницы
         y_position = (
-            doc.height - HEADER_TOP_MARGIN
+            doc.height
+            + PAGE_TOP_MARGIN
+            + PAGE_BOTTOM_MARGIN
+            - HEADER_TOP_MARGIN
         )  # отступ от верхнего края
-        print("doc.height: ", doc.height, "HEADER_TOP_MARGIN: ", HEADER_TOP_MARGIN, "PAGE_TOP_MARGIN :", PAGE_TOP_MARGIN)
         x_position = doc.leftMargin
 
         # Рисуем колонтитул
         w, h = header_para.wrap(doc.width, doc.height)  # Получаем размеры
-        header_para.drawOn(canvas, x_position, doc.height + PAGE_TOP_MARGIN + PAGE_BOTTOM_MARGIN - HEADER_TOP_MARGIN)
+        header_para.drawOn(canvas, x_position, y_position)
 
     # Рисуем нижний колонтитул
     if footer_info:
@@ -217,7 +220,7 @@ def parse_color(color_value):
                 )  # Умножаем на 17 для расширения 0-F до 0-255
             elif len(hex_color) == 6:
                 # Полный формат (RRGGBB)
-                rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
             else:
                 raise ValueError(
                     f"Неподдерживаемый формат HEX цвета: {color_value}"
@@ -243,78 +246,10 @@ def parse_color(color_value):
 
 
 # JSON схема для PDF, аналогичная DOCX
-JSON_SCHEMA_PDF = """
-    Верни ТОЛЬКО валидный JSON без пояснений.
-    Строгая схема:
-    {
-    "meta": {"title": "string", "page_size": "A4",
-             "header": {"text": "string", "font_name": "string",
-             "font_size": 12, "color": "string", "alignment": "left"},
-             "footer": {"text": "string (используйте {page},
-             {pageNumber} или {current_page} для номера страницы)",
-             "font_name": "string", "font_size": 12,
-             "color": "string", "alignment": "left"}},
-    "blocks": [
-        {"type":"heading","level":1,"text":"string",
-        "font_name":"string", "font_size":12, "color":"string"},
-        {"type":"paragraph","text":"string", "font_name":"string",
-        "font_size":12, "left_indent":0, "right_indent":0,
-        "space_after":12, "alignment":"left", "color":"string",
-        "bold":false, "italic":false, "underline":false},
-        {"type":"list", "ordered":false, "font_name":"string",
-        "font_size":12, "left_indent":0, "right_indent":0, "space_after":12,
-        "items":["item1", "item2"]},
-        {"type":"table", "headers":["column1", "column2"],
-           "rows":[["value1", "value2"], ["value3", "value4"]],
-           "params": {
-               "header_font_name":"CyrillicFont-Bold",
-               "header_font_size":10,
-               "header_color":"string",
-               "header_bg_color":"string",
-               "header_alignment":"center",
-               "header_valign":"middle",
-               "body_font_name":"string",
-               "body_font_size":9,
-               "body_color":"string",
-               "body_bg_color":"string",
-               "body_alignment":"left",
-               "body_valign":"middle",
-               "grid_width":0.5,
-               "grid_color":"black",
-               "align":"LEFT",
-               "valign":"TOP",
-               "padding_top":6,
-               "padding_bottom":6,
-               "body_padding_top":4,
-               "body_padding_bottom":4
-           },
-           "column_widths": [100, 150, 200],
-           "cell_properties": [
-               {
-                   "row": 0,  # или "last", "first", "header" для спец значений
-                   "col": 0,
-                   "bg_color": "yellow",
-                   "text_color": "black",
-                   "font_name": "CyrillicFont-Bold",
-                   "font_size": 12,
-                   "alignment": "center",
-                   "valign": "middle",
-                   "border_width": 1,
-                   "border_color": "black",
-                   "border_style": "solid",
-                   "text_wrap": true
-               }
-           ]
-        },
-        {"type":"math", "formula":"LaTeX formula",
-        "caption":"optional caption",
-        "font_name":"string", "font_size":12,
-        "math_font_size":12,
-        "caption_font_size":10, "bold":false, "italic":true,
-        "alignment":"left"}
-    ]
-    }
-    """
+# JSON_SCHEMA_PDF теперь определена в global_state.py
+# и импортируется как DOCUMENT_JSON_SCHEMA
+# Для обратной совместимости, создаем алиас
+JSON_SCHEMA_PDF = DOCUMENT_JSON_SCHEMA
 
 
 # Регистрируем шрифт, поддерживающий кириллицу
@@ -478,8 +413,33 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
         page_size = DEFAULT_PAGE_SIZE
 
     # Получаем информацию о колонтитулах
-    header_info = meta.get("header", None)
-    footer_info = meta.get("footer", None)
+    # Обработка заголовков и футеров в новом формате
+    header_data = meta.get("header", None)
+    footer_data = meta.get("footer", None)
+
+    # Преобразование нового формата в старый для совместимости
+    header_info = None
+    footer_info = None
+
+    if header_data:
+        # Преобразуем новый формат в старый
+        header_info = {
+            "text": header_data.get("content", ""),
+            "font_name": header_data.get("font_name", CYRILLIC_FONT),
+            "font_size": header_data.get("font_size", 10),
+            "color": header_data.get("color", "black"),
+            "alignment": header_data.get("alignment", "left"),
+        }
+
+    if footer_data:
+        # Преобразуем новый формат в старый
+        footer_info = {
+            "text": footer_data.get("content", ""),
+            "font_name": footer_data.get("font_name", CYRILLIC_FONT),
+            "font_size": footer_data.get("font_size", 10),
+            "color": footer_data.get("color", "black"),
+            "alignment": footer_data.get("alignment", "left"),
+        }
 
     # Создаем документ с настраиваемыми полями и поддержкой колонтитулов
     doc = CustomDocTemplate(
@@ -1082,7 +1042,7 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
                         parent=styles["Normal"],
                         fontSize=caption_font_size,
                         fontName=font_name,
-                        alignment=TA_LEFT if alignment != "left" else TA_LEFT,
+                        alignment=alignment_val,
                     )
 
                     caption_para = Paragraph(caption, caption_style)
@@ -1173,6 +1133,276 @@ def create_pdf_from_json(data: dict) -> io.BytesIO:
 
                     caption_para = Paragraph(caption, caption_style)
                     elements.append(caption_para)
+
+        elif block_type == "function_graph":
+            # Для графиков функций создаем изображение с помощью matplotlib
+            try:
+                import matplotlib
+                import matplotlib.pyplot as plt
+                import numpy as np
+                import io as io_module
+
+                matplotlib.use("Agg")  # Use non-interactive backend
+
+                function_expr = block.get("function", "x")
+                x_min = block.get("x_min", -10)
+                x_max = block.get("x_max", 10)
+                title = block.get("title", "")
+                xlabel = block.get("xlabel", "x")
+                ylabel = block.get("ylabel", "y")
+                width = block.get("width", 6)
+                height = block.get("height", 4)
+                line_color = block.get("line_color", "blue")
+                line_width = block.get("line_width", 2)
+                show_grid = block.get("show_grid", True)
+                caption = block.get("caption", "")
+                alignment = block.get("alignment", "center")
+
+                # Создаем массив x значений
+                x = np.linspace(x_min, x_max, 400)
+
+                # Подготавливаем выражение для вычисления
+                # Проверяем, что выражение не содержит LaTeX команды
+                # или другие недопустимые элементы
+                safe_expr = function_expr.replace(" ", "")
+
+                if "=" in safe_expr:
+                    # Если в выражении есть '=', пытаемся извлечь правую часть
+                    parts = safe_expr.split("=", 1)
+                    if len(parts) > 1:
+                        safe_expr = parts[
+                            1
+                        ].strip()  # Берем правую часть после знака равно
+                    else:
+                        safe_expr = safe_expr.replace(
+                            "=", ""
+                        )  # Просто убираем знак равно если он не в уравнении
+
+                # Заменяем '^' на '**' для возведения в степень в Python
+                safe_expr = safe_expr.replace("^", "**")
+
+                if (
+                    "\\equiv" in safe_expr
+                    or "\\pmod" in safe_expr
+                    or "\\int" in safe_expr
+                    or "\\sum" in safe_expr
+                    or "\\frac" in safe_expr
+                ):
+                    raise ValueError(
+                        f"Invalid function expression: '{function_expr}'."
+                        f" This appears to be a LaTeX formula, "
+                        f"not a mathematical expression."
+                        f" Use 'math' block type for LaTeX formulas."
+                    )
+
+                # Вычисляем y значения
+                # Создаем безопасное окружение для eval
+                namespace = {
+                    "x": x,
+                    "np": np,
+                    "sin": np.sin,
+                    "cos": np.cos,
+                    "tan": np.tan,
+                    "exp": np.exp,
+                    "log": np.log,
+                    "sqrt": np.sqrt,
+                    "abs": np.abs,
+                    "pi": np.pi,
+                    "e": np.e,
+                }
+
+                y = eval(safe_expr, {"__builtins__": {}}, namespace)
+
+                # Создаем график
+                fig, ax = plt.subplots(figsize=(width, height))
+                ax.plot(x, y, color=line_color, linewidth=line_width)
+
+                # Добавляем заголовок и подписи к осям
+                if title:
+                    ax.set_title(title)
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+
+                # Показываем сетку, если нужно
+                if show_grid:
+                    ax.grid(True)
+
+                # Сохраняем в байтовый поток
+                img_buffer = io_module.BytesIO()
+                plt.savefig(
+                    img_buffer, format="png", bbox_inches="tight", dpi=150
+                )
+                img_buffer.seek(0)
+
+                # Закрываем фигуру matplotlib
+                plt.close(fig)
+
+                # Преобразуем размеры из дюймов в точки (1 дюйм = 72 точки)
+                width_points = width * 72
+                height_points = height * 72
+
+                # Создаем изображение с подходящими размерами
+                img = RLImage(
+                    img_buffer, width=width_points, height=height_points
+                )
+
+                # Выравнивание изображения
+                if alignment == "center":
+                    img.hAlign = "CENTER"
+                elif alignment == "right":
+                    img.hAlign = "RIGHT"
+                else:
+                    img.hAlign = "LEFT"
+
+                elements.append(img)
+
+                # Если есть подпись, добавляем её
+                if caption:
+                    # Определяем выравнивание
+                    alignment_val = TA_LEFT
+                    if alignment == "center":
+                        alignment_val = TA_CENTER
+                    elif alignment == "right":
+                        alignment_val = TA_RIGHT
+
+                    # Создаем стиль для подписи
+                    font_name = block.get("font_name", CYRILLIC_FONT)
+                    font_name = normalize_font_name(font_name)
+                    caption_font_size = block.get("caption_font_size", 10)
+
+                    caption_style = ParagraphStyle(
+                        "CaptionStyle",
+                        parent=styles["Normal"],
+                        fontSize=caption_font_size,
+                        fontName=font_name,
+                        alignment=alignment_val,
+                    )
+
+                    caption_para = Paragraph(caption, caption_style)
+                    elements.append(caption_para)
+
+            except Exception as e:
+                # Если возникла ошибка при создании изображения,
+                # добавляем сообщение об ошибке
+                print(f"Ошибка при создании графика функции: {e}")
+
+                # Определяем выравнивание
+                alignment = block.get("alignment", "center")
+                alignment_val = TA_LEFT
+                if alignment == "center":
+                    alignment_val = TA_CENTER
+                elif alignment == "right":
+                    alignment_val = TA_RIGHT
+
+                # Создаем стиль для сообщения об ошибке
+                font_name = block.get("font_name", CYRILLIC_FONT)
+                font_name = normalize_font_name(font_name)
+
+                error_style = ParagraphStyle(
+                    "ErrorStyle",
+                    parent=styles["Normal"],
+                    fontSize=10,
+                    fontName=font_name,
+                    textColor=RLColor(1, 0, 0),  # Красный цвет
+                    alignment=alignment_val,
+                )
+
+                error_para = Paragraph(
+                    f"Ошибка при построении графика: {str(e)}", error_style
+                )
+                elements.append(error_para)
+
+        elif block_type == "toc":
+            # Для оглавления создаем специальный блок
+            title = block.get("title", "Оглавление")
+            levels = block.get("levels", [1, 2, 3])
+            font_name = block.get("font_name", CYRILLIC_FONT)
+            font_name = normalize_font_name(font_name)
+            font_size = block.get("font_size", 12)
+            indent = block.get("indent", 10)
+            leader_dots = block.get("leader_dots", True)
+            include_pages = block.get("include_pages", True)
+            alignment = block.get("alignment", "left")  # left, center, right
+
+            # Создаем заголовок оглавления
+            # Определяем выравнивание
+            alignment_val = TA_LEFT
+            if alignment == "center":
+                alignment_val = TA_CENTER
+            elif alignment == "right":
+                alignment_val = TA_RIGHT
+            elif alignment == "justify":
+                alignment_val = (
+                    TA_LEFT  # ReportLab doesn't have justify for this context
+                )
+
+            toc_title_style = ParagraphStyle(
+                "TOCTitle",
+                parent=styles["Heading1"],
+                fontSize=font_size,
+                fontName=font_name,
+                spaceAfter=12,
+                alignment=alignment_val,
+            )
+
+            toc_title = Paragraph(title, toc_title_style)
+            elements.append(toc_title)
+
+            # В PDF формате сложно сделать динамическое оглавление
+            # с гиперссылками
+            # Поэтому создаем структурированный список, имитирующий оглавление
+            toc_entries = block.get(
+                "entries",
+                [
+                    {"text": "Введение", "level": 1, "page": 1},
+                    {"text": "Основная часть", "level": 1, "page": 3},
+                    {"text": "Подраздел 1", "level": 2, "page": 4},
+                    {"text": "Подраздел 2", "level": 2, "page": 6},
+                    {"text": "Заключение", "level": 1, "page": 8},
+                    {"text": "Список литературы", "level": 1, "page": 10},
+                ],
+            )
+
+            for entry in toc_entries:
+                level = entry["level"]
+                text = entry["text"]
+                page = entry.get("page", 1)  # по умолчанию страница 1
+
+                # Проверяем, входит ли уровень в разрешенные
+                if level in levels:
+                    # Создаем отступ в зависимости от уровня
+                    left_padding = 6 + (level - 1) * indent
+
+                    # Определяем выравнивание для элементов оглавления
+                    toc_alignment_val = TA_LEFT
+                    if alignment == "center":
+                        toc_alignment_val = TA_CENTER
+                    elif alignment == "right":
+                        toc_alignment_val = TA_RIGHT
+                    elif alignment == "justify":
+                        toc_alignment_val = TA_LEFT
+
+                    toc_entry_style = ParagraphStyle(
+                        "TOCEntry",
+                        parent=styles["Normal"],
+                        fontSize=font_size - 2 if level > 1 else font_size,
+                        fontName=font_name,
+                        leftIndent=left_padding,
+                        spaceAfter=6,
+                        alignment=toc_alignment_val,
+                    )
+
+                    # Формируем текст оглавления с точками и номером страницы
+                    if include_pages and leader_dots:
+                        # В простом PDF формате сложно сделать точки
+                        # до номера страницы
+                        # Поэтому просто добавим текст с информацией о странице
+                        toc_text = f"{text} .................... {page}"
+                    else:
+                        toc_text = text
+
+                    toc_entry = Paragraph(toc_text, toc_entry_style)
+                    elements.append(toc_entry)
 
     # Собираем документ
     doc.build(elements)
