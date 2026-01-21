@@ -78,6 +78,12 @@ SYSTEM_PROMPTS = {
     ),
 }
 
+RTF_PROMPT = """
+    Верни ТОЛЬКО валидныйr rtf без пояснений.
+    Не используй markdown, только rtf.
+    Не включай тройные кавычки в значениях.
+"""
+
 
 # Shared JSON schema for document generation across formats (DOCX, PDF, etc.)
 DOCUMENT_JSON_SCHEMA = """

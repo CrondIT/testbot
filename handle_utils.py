@@ -21,6 +21,8 @@ from global_state import (
     user_file_data,
     MAX_CONTEXT_MESSAGES,
     SYSTEM_PROMPTS,
+    RTF_PROMPT,
+
 )
 from message_utils import send_long_message
 from pdf_utils import send_pdf_response
@@ -65,6 +67,8 @@ async def handle_file_analysis_mode(
         user_message = user_message + " " + pdf_utils.JSON_SCHEMA_PDF
     elif wants_excel_format:
         user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
+    elif wants_rtf_format:
+        user_message = user_message + " " + RTF_PROMPT
 
     # Check if the message contains a document
     if update.message.document:
@@ -643,7 +647,7 @@ async def handle_chat_mode(
         elif wants_excel_format:
             user_message = user_message + " " + xlsx_utils.JSON_SCHEMA_EXCEL
         elif wants_rtf_format:
-            user_message = user_message
+            user_message = user_message + " " + RTF_PROMPT
         if user_id in user_contexts and "chat" in user_contexts[user_id]:
             # Create a temporary history that includes the current user message
             temp_history = user_contexts[user_id]["chat"] + [
