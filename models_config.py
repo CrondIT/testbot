@@ -1,8 +1,6 @@
 """Configuration for AI models used by the bot."""
-import io
 from google import genai
 from openai import OpenAI
-import base64
 import token_utils
 from global_state import (
     OPENAI_API_KEY_CHAT,
@@ -142,64 +140,6 @@ async def generate_image(prompt: str) -> str:
         return response.data[0].url
     except Exception as e:
         raise Exception(f"Ошибка генерации изображения: {str(e)}")
-
-
-async def edit_image_with_gemini(
-    original_image: io.BytesIO, prompt: str
-) -> str:
-    """Редактирует изображение с помощью Gemini 2.5 Flash"""
-    model_name = MODELS["edit"]  # Используем константу
-    try:
-        # Проверяем длину промпта на токены
-        prompt_tokens = token_utils.token_counter.count_openai_tokens(
-            prompt, model_name
-        )
-        max_tokens = token_utils.get_token_limit(model_name)
-
-        if prompt_tokens > max_tokens:
-            # Обрезаем промпт до допустимого размера
-            avg_token_size = 4  # средний размер токена в символах
-            max_chars = max_tokens * avg_token_size
-            prompt = prompt[:max_chars]
-
-        # Подготовка изображения для Gemini
-        original_image.seek(0)
-        image_bytes = original_image.read()
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        # Подготавливаем промпт для Gemini
-        gemini_prompt = f"""
-        Оригинальное изображение: {image_base64[:100]}...
-        Проанализируй это изображение и выполни следующие изменения: {prompt}
-        Важные инструкции:
-        1. Внеси именно те изменения, которые запрошены пользователем
-        2. Сохрани общий стиль и качество изображения
-        3. Если запрос неясен, уточни у пользователя
-        4. Верни только измененное изображение без дополнительного текста
-        """
-        # Отправляем изображение и промпт в Gemini
-        response = client_edit_image.models.generate_content(
-            model=model_name,
-            contents=[gemini_prompt],
-        )
-        # Проверяем, содержит ли ответ изображение
-        if hasattr(response, "candidates") and response.candidates:
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, "inline_data"):
-                    # Возвращаем данные изображения
-                    return part.inline_data.data
-                elif hasattr(part, "text"):
-                    # Если Gemini вернул текст вместо изображения
-                    raise Exception(
-                        f"""
-                        ИИ вернул текстовый ответ вместо изображения:
-                        {part.text}"""
-                    )
-        # Если не нашли изображение в ответе
-        raise Exception("Gemini не вернул изображение в ответе")
-    except Exception as e:
-        raise Exception(
-            f"Ошибка редактирования изображения: {str(e)}"
-        )
 
 
 async def transcribe_voice(file_path: str) -> str:

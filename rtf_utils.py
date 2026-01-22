@@ -2,19 +2,9 @@
 Utility functions for creating and handling RTF files.
 """
 
-import logging
 import tempfile
 import os
 import datetime
-
-# ---------------------------------------------------------
-# Логирование
-# ---------------------------------------------------------
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
 
 
 def check_user_wants_rtf_format(user_message):
@@ -117,10 +107,8 @@ async def send_rtf_response(update, reply, image_url=None):
                 caption="Файл с ответом модели (RTF)"
             )
 
-        logger.info(f"Файл отправлен: {file_path}")
-
     except Exception as e:
-        logger.exception("Ошибка обработки сообщения")
+        print("Ошибка обработки сообщения")
         await update.message.reply_text(
             f"Произошла ошибка при обработке вашего запроса {e}."
         )
@@ -129,6 +117,6 @@ async def send_rtf_response(update, reply, image_url=None):
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                logger.info(f"Временный файл удалён: {file_path}")
+                print(f"Временный файл удалён: {file_path}")
         except Exception:
-            logger.warning(f"Не удалось удалить временный файл: {file_path}")
+            print(f"Не удалось удалить временный файл: {file_path}")

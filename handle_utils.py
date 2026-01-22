@@ -22,7 +22,7 @@ from global_state import (
     MAX_CONTEXT_MESSAGES,
     SYSTEM_PROMPTS,
     RTF_PROMPT,
-
+    MODELS,
 )
 from message_utils import send_long_message
 from pdf_utils import send_pdf_response
@@ -517,48 +517,90 @@ async def handle_image_edit_mode(
     """Handle the image edit mode functionality separately"""
     from billing_utils import spend_coins
     import os
+    from global_state import user_edit_pending, MODELS
+
+    # Инициализируем переменную для пути к файлу
+    file_path = None
 
     # Проверяем, есть ли фото в сообщении
-    if not update.message.photo:
-        await update.message.reply_text(
-            "🖼️ Пожалуйста, отправьте изображение для редактирования."
-        )
-        return
+    if update.message.photo:
+        # Если есть фото, проверяем, есть ли текстовый запрос
+        # (промпт) для редактирования
+        if not user_message:
+            # Сохраняем информацию о фото для последующего редактирования
+            photo = update.message.photo[
+                -1
+            ]  # Последнее фото - с самым высоким разрешением
+            file = await context.bot.get_file(photo.file_id)
 
-    # Получаем фото (берем самое высокое разрешение)
-    photo = update.message.photo[
-        -1
-    ]  # Последнее фото - с самым высоким разрешением
-    file = await context.bot.get_file(photo.file_id)
+            # Определяем расширение файла
+            file_ext = ".jpg"  # Telegram converts photos to JPEG
 
-    # Определяем расширение файла
-    file_ext = ".jpg"  # Telegram converts photos to JPEG
-
-    # Скачиваем файл
-    file_path = f"temp_edit_{user_id}_{update.message.message_id}{file_ext}"
-    await file.download_to_drive(file_path)
-
-    try:
-        # Читаем изображение в байты
-        with open(file_path, "rb") as f:
-            image_bytes = f.read()
-
-        # Проверяем, есть ли текст запроса от пользователя
-        if not user_message.strip():
-            await update.message.reply_text(
-                "📝 Пожалуйста, укажите, что именно вы хотите изменить."
+            # Скачиваем файл
+            file_path = (
+                f"temp_edit_{user_id}_{update.message.message_id}{file_ext}"
             )
-            os.remove(file_path)
+            await file.download_to_drive(file_path)
+
+            # Сохраняем путь к файлу в состоянии ожидания
+            user_edit_pending[user_id] = file_path
+
+            # Запрашиваем у пользователя промпт для редактирования
+            await update.message.reply_text(
+                "✏️ Теперь укажите, что нужно выполнить с изображением."
+            )
+            return
+        else:
+            # Если есть и фото, и промпт - обрабатываем сразу
+            photo = update.message.photo[
+                -1
+            ]  # Последнее фото - с самым высоким разрешением
+            file = await context.bot.get_file(photo.file_id)
+
+            # Определяем расширение файла
+            file_ext = ".jpg"  # Telegram converts photos to JPEG
+
+            # Скачиваем файл
+            file_path = (
+                f"temp_edit_{user_id}_{update.message.message_id}{file_ext}"
+            )
+            await file.download_to_drive(file_path)
+    else:
+        # Нет фото в текущем сообщении
+        if user_id in user_edit_pending:
+            # Проверяем, есть ли ожидающее изображение для редактирования
+            file_path = user_edit_pending[user_id]
+
+            # Удаляем из состояния ожидания
+            del user_edit_pending[user_id]
+
+            # Проверяем, существует ли файл
+            if not os.path.exists(file_path):
+                await update.message.reply_text(
+                    "❌ Время ожидания изображения истекло или файл был удален. Пожалуйста, отправьте изображение заново."
+                )
+                return
+        else:
+            # Нет фото и нет ожидающего изображения
+            await update.message.reply_text(
+                "🖼️ Пожалуйста, сначала отправьте изображение для редактирования."
+            )
             return
 
-        # Создаем экземпляр редактора изображений
-        editor = image_edit_utils.AsyncImageEditor()
-
+    try:
+        # Подсчитываем токены, использованные для запроса
+        model_name = MODELS["edit"]
+        token_count = token_utils.token_counter.count_openai_tokens(
+            user_message, model_name
+        )
+        print("token_count :", token_count)
         # Отправляем сообщение о начале редактирования
         await update.message.reply_text("🎨 Редактирую изображение...")
 
         # Редактируем изображение
-        edited_image_bytes = await editor.edit_image(image_bytes, user_message)
+        edited_image_bytes = await image_edit_utils.edit_image(
+            file_path, user_message
+        )
 
         # Сохраняем отредактированное изображение
         edited_file_path = (
@@ -574,14 +616,6 @@ async def handle_image_edit_mode(
                 caption=f"Отредактировано по запросу: {user_message}",
             )
 
-        # Подсчитываем токены, использованные для запроса
-        model_name = (
-            "imagen-4.0-generate-001"  # модель для редактирования изображений
-        )
-        token_count = token_utils.token_counter.count_openai_tokens(
-            user_message, model_name
-        )
-
         # Списываем монеты и записываем лог
         spend_coins(
             user_id,
@@ -594,13 +628,23 @@ async def handle_image_edit_mode(
         )
 
         # Удаляем временные файлы
-        os.remove(file_path)
-        os.remove(edited_file_path)
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        if os.path.exists(edited_file_path):
+            os.remove(edited_file_path)
+
+        # Удаляем из состояния ожидания, если оно там есть
+        if user_id in user_edit_pending:
+            del user_edit_pending[user_id]
 
     except Exception as e:
         # Удаляем временные файлы даже при ошибке
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
+
+        # Удаляем из состояния ожидания, если оно там есть
+        if user_id in user_edit_pending:
+            del user_edit_pending[user_id]
 
         # LOGGING ====================
         log_text = f"Ошибка при редактировании изображения: {str(e)}"
@@ -637,9 +681,7 @@ async def handle_chat_mode(
         wants_excel_format = xlsx_utils.check_user_wants_xlsx_format(
             user_message
         )
-        wants_rtf_format = rtf_utils.check_user_wants_rtf_format(
-            user_message
-        )
+        wants_rtf_format = rtf_utils.check_user_wants_rtf_format(user_message)
         if wants_word_format:
             user_message = user_message + " " + docx_utils.JSON_SCHEMA
         elif wants_pdf_format:
@@ -759,6 +801,23 @@ async def handle_message_or_voice(
         user_modes[user_id] = "chat"
 
     current_mode = user_modes[user_id]
+
+    # Проверяем, изменился ли режим и нужно ли очистить состояние ожидания редактирования
+    from global_state import user_edit_pending, user_previous_modes
+
+    previous_mode = user_previous_modes.get(user_id)
+    if (
+        user_id in user_edit_pending
+        and previous_mode
+        and previous_mode != current_mode
+    ):
+        # Если пользователь меняет режим, удаляем ожидающее изображение для редактирования
+        if os.path.exists(user_edit_pending[user_id]):
+            os.remove(user_edit_pending[user_id])
+        del user_edit_pending[user_id]
+
+    # Сохраняем текущий режим как предыдущий для следующей проверки
+    user_previous_modes[user_id] = current_mode
 
     # --- start coins check ---
     user_data, coins, giftcoins, balance, cost = (
