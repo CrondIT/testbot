@@ -19,6 +19,9 @@ from global_state import (
     user_contexts,
     user_modes,
     user_file_data,
+    user_edit_pending,
+    edited_photo_id,
+    user_last_edited_images,
     MAX_CONTEXT_MESSAGES,
     SYSTEM_PROMPTS,
     RTF_PROMPT,
@@ -43,6 +46,30 @@ def initialize_user_context(user_id: int, current_mode: str):
         user_contexts[user_id][current_mode] = [
             {"role": "system", "content": system_message}
         ]
+
+
+# ==================== ФУНКЦИЯ НИГДЕ НЕ ИСПОЛЬЗУЕТЯ ====================
+async def get_last_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """находит последнее фото в чате"""
+    chat_id = update.effective_chat.id
+    try:
+        # Получаем историю сообщений (последние 15 сообщений)
+        messages = await context.bot.get_chat_history(chat_id, limit=15)
+
+        last_photo_id = None
+        # Ищем последнее сообщение с фото
+        async for message in messages:
+            if message.photo:
+                last_photo_id = message.photo[-1].file_id
+                break
+        if last_photo_id:
+            # Отправляем пользователю найденный file_id
+            return last_photo_id
+        else:
+            return None
+    except Exception as e:
+        print(f"Error in get_last_photo: {e}")
+        return None
 
 
 async def handle_file_analysis_mode(
@@ -517,13 +544,23 @@ async def handle_image_edit_mode(
     """Handle the image edit mode functionality separately"""
     from billing_utils import spend_coins
     import os
-    from global_state import user_edit_pending
 
     # Инициализируем переменную для пути к файлу
     file_path = None
     file_ext = ".jpg"  # Телеграм все в jpeg превращает
     # Проверяем, есть ли фото в сообщении
     if update.message.photo:
+        if user_id in edited_photo_id:
+            # Удаляем предыдущее (отредактированное) фото из кэша
+            del edited_photo_id[user_id]
+
+        # Если у пользователя уже есть предыдущее
+        # отредактированное изображение, удаляем его
+        if user_id in user_last_edited_images:
+            if os.path.exists(user_last_edited_images[user_id]):
+                os.remove(user_last_edited_images[user_id])
+            del user_last_edited_images[user_id]
+
         # Сохраняем информацию о фото для последующего редактирования
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
@@ -532,10 +569,10 @@ async def handle_image_edit_mode(
             f"temp_edit_{user_id}_{update.message.message_id}{file_ext}"
         )
         await file.download_to_drive(file_path)
-        # Сохраняем путь к файлу в состоянии ожидания
-        user_edit_pending[user_id] = file_path
 
         if not user_message:
+            # Сохраняем путь к файлу в состоянии ожидания
+            user_edit_pending[user_id] = file_path
             await update.message.reply_text(
                 "✏️ Теперь укажите, что нужно выполнить с изображением."
             )
@@ -556,8 +593,21 @@ async def handle_image_edit_mode(
                     """
                 )
                 return
+        elif user_message and user_id in user_last_edited_images:
+            # Если пользователь отправляет промпт без изображения
+            # и есть предыдущее изображение
+            file_path = user_last_edited_images[user_id]
+            # Проверяем, существует ли файл
+            if not os.path.exists(file_path):
+                await update.message.reply_text(
+                    """
+                    🖼️ Предыдущее изображение не найдено.
+                    Пожалуйста, отправьте новое изображение для редактирования.
+                    """
+                )
+                return
         else:
-            # Нет фото и нет ожидающего изображения
+            # Нет фото и нет ожидающего изображения или предыдущего изображения
             await update.message.reply_text(
                 "🖼️ Пожалуйста, отправьте изображение для редактирования."
             )
@@ -592,6 +642,17 @@ async def handle_image_edit_mode(
                 caption=f"Отредактировано по запросу: {user_message}",
             )
 
+        # Если у пользователя уже есть предыдущее
+        # отредактированное изображение,
+        # удаляем его перед сохранением нового
+        if user_id in user_last_edited_images:
+            if os.path.exists(user_last_edited_images[user_id]):
+                os.remove(user_last_edited_images[user_id])
+
+        # Сохраняем путь к отредактированному
+        # изображению как последнее отредактированное
+        user_last_edited_images[user_id] = edited_file_path
+
         # Списываем монеты и записываем лог
         spend_coins(
             user_id,
@@ -606,9 +667,6 @@ async def handle_image_edit_mode(
         # Удаляем временные файлы
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
-        if os.path.exists(edited_file_path):
-            os.remove(edited_file_path)
-
         # Удаляем из состояния ожидания, если оно там есть
         if user_id in user_edit_pending:
             del user_edit_pending[user_id]
@@ -780,7 +838,11 @@ async def handle_message_or_voice(
 
     # Проверяем, изменился ли режим и нужно
     # ли очистить состояние ожидания редактирования
-    from global_state import user_edit_pending, user_previous_modes
+    from global_state import (
+        user_edit_pending,
+        user_previous_modes,
+        user_last_edited_images,
+    )
 
     previous_mode = user_previous_modes.get(user_id)
     if (
@@ -793,6 +855,18 @@ async def handle_message_or_voice(
         if os.path.exists(user_edit_pending[user_id]):
             os.remove(user_edit_pending[user_id])
         del user_edit_pending[user_id]
+
+    # Также очищаем предыдущее отредактированное изображение,
+    # если пользователь меняет режим с edit на другой
+    if (
+        user_id in user_last_edited_images
+        and previous_mode == "edit"
+        and current_mode != "edit"
+    ):
+        # Удаляем файл предыдущего отредактированного изображения
+        if os.path.exists(user_last_edited_images[user_id]):
+            os.remove(user_last_edited_images[user_id])
+        del user_last_edited_images[user_id]
 
     # Сохраняем текущий режим как предыдущий для следующей проверки
     user_previous_modes[user_id] = current_mode
