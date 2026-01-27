@@ -9,6 +9,7 @@ import io
 import json
 from telegram import InputFile
 from telegram.helpers import escape_markdown
+from telegram.error import TimedOut
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -1564,10 +1565,24 @@ async def send_docx_response(
             caption="Ваш ответ в формате Word",
         )
         if image_url:
-            await update.message.reply_photo(
-                image_url,
-                caption="Вот что сгенерировано по Вашему запросу",
-            )
+            try:
+                await update.message.reply_photo(
+                    image_url,
+                    caption="Вот что сгенерировано по Вашему запросу",
+                )
+            except TimedOut:
+                await update.message.reply_text(
+                    "⏰ Время ожидания отправки изображения истекло. "
+                    "Изображение не было отправлено, но документ  создан."
+                )
+            except Exception as photo_error:
+                if "timeout" in str(photo_error).lower():
+                    await update.message.reply_text(
+                        "⏰ Время ожидания отправки изображения истекло. "
+                        "Изображение не было отправлено, но документ создан."
+                    )
+                else:
+                    raise photo_error
     except json.JSONDecodeError as e:
         # Если ответ не является валидным JSON,
         # отправляем обычное сообщение

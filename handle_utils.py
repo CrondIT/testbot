@@ -15,6 +15,7 @@ import image_edit_utils
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
+from telegram.error import TimedOut
 from global_state import (
     user_contexts,
     user_modes,
@@ -99,7 +100,6 @@ async def handle_file_analysis_mode(
 
     # Check if the message contains a document
     if update.message.document:
-        print("1. Check if the message contains a document")
         # Get the file
         file = await context.bot.get_file(update.message.document.file_id)
 
@@ -123,7 +123,6 @@ async def handle_file_analysis_mode(
 
         try:
             # Extract text from file
-            print("2. Extract text from file")
             await update.message.reply_text("📄 Извлекаю текст из файла...")
 
             extracted_text = await file_utils.process_uploaded_file(
@@ -212,8 +211,6 @@ async def handle_file_analysis_mode(
 
         max_tokens = token_utils.get_token_limit(model_name)
 
-        print(f"model {model_name} max tokens {max_tokens}")
-
         # Calculate more conservative character
         # limit considering the full message with history
         # Reserve more tokens for context,
@@ -226,7 +223,6 @@ async def handle_file_analysis_mode(
         max_chars = min(
             len(extracted_text), max_content_tokens * avg_token_size
         )
-        print(f"max_chars {max_chars}")
         if len(extracted_text) > max_chars:
             # Truncate the extracted text and inform the user
             truncated_extracted_text = extracted_text[:max_chars]
@@ -247,7 +243,6 @@ async def handle_file_analysis_mode(
         question_tokens = token_utils.token_counter.count_openai_tokens(
             augmented_question, model_name
         )
-        print(f"question_tokens {question_tokens}")
         if question_tokens > max_content_tokens:
             # The combined content (file + question) exceeds token limits
             # Try to preserve as much of the file content
@@ -303,11 +298,6 @@ async def handle_file_analysis_mode(
                     f"до {max_total_chars} символов для укладывания в лимиты."
                 )
 
-        print(
-            f"model {model_name} max tokens {max_tokens}"
-            f"max_chars {max_chars} question_tokens {question_tokens}"
-        )
-
         # Prepare messages with truncated history
         # using the augmented question
         truncated_history = token_utils.truncate_messages_for_token_limit(
@@ -325,19 +315,15 @@ async def handle_file_analysis_mode(
 
         try:
             # Используем клиент чата
-            print("3. Используем клиент чата")
             # Проверяем, что последнее сообщение - это от пользователя
             if messages and messages[-1]["role"] == "user":
                 # Проверяем токены перед отправкой
-                print("4. Проверяем токены перед отправкой")
                 token_counter = token_utils.token_counter
                 total_tokens = token_counter.count_openai_messages_tokens(
                     messages, model_name
                 )
                 max_tokens = token_utils.get_token_limit(model_name)
-                print(f"4 before send total {total_tokens} max {max_tokens}")
                 if total_tokens > max_tokens:
-                    print("5 Обрезаем сообщения до ... [truncated]")
                     # Обрезаем сообщения до ... [truncated]
                     messages = token_utils.truncate_messages_for_token_limit(
                         messages,
@@ -349,11 +335,6 @@ async def handle_file_analysis_mode(
                     #  truncate the user message specifically
                     total_tokens = token_counter.count_openai_messages_tokens(
                         messages, model_name
-                    )
-                    print(
-                        f"Double-check tokens before send {total_tokens}"
-                        f"max tokens {max_tokens}"
-                        f"message {messages}"
                     )
                     if (
                         total_tokens > max_tokens
@@ -374,7 +355,6 @@ async def handle_file_analysis_mode(
                             messages[-1]["content"] = original_content[
                                 :max_content_chars
                             ]
-            print(f"6. model {model_name} {user_message}")
             # Prepare the full context including system message,
             # history and current query
             system_message = SYSTEM_PROMPTS.get("ai_file")
@@ -519,9 +499,21 @@ async def handle_image_create_mode(
 
     try:
         image_url = await models_config.generate_image(user_message)
-        await update.message.reply_photo(
-            image_url, caption=f"Сгенерировано по запросу: {user_message}"
-        )
+        try:
+            await update.message.reply_photo(
+                image_url, caption=f"Сгенерировано по запросу: {user_message}"
+            )
+        except TimedOut:
+            await update.message.reply_text(
+                "⏰ Время ожидания отправки изображения истекло. "
+                "Пожалуйста, попробуйте снова."
+            )
+            # Логируем ошибку таймаута
+            log_text = "Таймаут при отправке сгенерированного изображения"
+            dbbot.log_action(user_id, "image", log_text, 0, balance)
+            return
+        except Exception as photo_error:
+            raise photo_error
         # Списываем монеты и записываем лог
         spend_coins(user_id, cost, coins, giftcoins, "image", user_message, "")
     except Exception as e:
@@ -619,14 +611,37 @@ async def handle_image_edit_mode(
         token_count = token_utils.token_counter.count_openai_tokens(
             user_message, model_name
         )
-        print("token_count :", token_count)
         # Отправляем сообщение о начале редактирования
         await update.message.reply_text("🎨 Редактирую изображение...")
 
         # Редактируем изображение
-        edited_image_bytes = await image_edit_utils.edit_image(
-            file_path, user_message
-        )
+        try:
+            edited_image_bytes = await image_edit_utils.edit_image(
+                file_path, user_message
+            )
+        except TimedOut:
+            await update.message.reply_text(
+                "⏰ Время ожидания редактирования изображения истекло. "
+                "Пожалуйста, попробуйте снова с более простым запросом, "
+                "или другим изображением."
+            )
+            # Логируем ошибку таймаута редактирования
+            log_text = "Таймаут при редактировании изображения"
+            dbbot.log_action(user_id, "edit", log_text, 0, balance)
+            return
+        except Exception as edit_error:
+            if "timeout" in str(edit_error).lower():
+                await update.message.reply_text(
+                    "⏰ Время ожидания редактирования изображения истекло. "
+                    "Пожалуйста, попробуйте снова с более простым запросом, "
+                    "или другим изображением."
+                )
+                # Логируем ошибку таймаута редактирования
+                log_text = f"Таймаут при редактировании: {str(edit_error)}"
+                dbbot.log_action(user_id, "edit", log_text, 0, balance)
+                return
+            else:
+                raise edit_error
 
         # Сохраняем отредактированное изображение
         edited_file_path = (
@@ -636,11 +651,22 @@ async def handle_image_edit_mode(
             f.write(edited_image_bytes)
 
         # Отправляем отредактированное изображение пользователю
-        with open(edited_file_path, "rb") as f:
-            await update.message.reply_photo(
-                photo=f,
-                caption=f"Отредактировано по запросу: {user_message}",
+        try:
+            with open(edited_file_path, "rb") as f:
+                await update.message.reply_photo(
+                    photo=f,
+                    caption=f"Отредактировано по запросу: {user_message}",
+                )
+        except TimedOut:
+            await update.message.reply_text(
+                "⏰ Время ожидания отправки изображения истекло. "
+                "Пожалуйста, попробуйте снова или с другим изображением."
             )
+            # Логируем ошибку таймаута
+            log_text = "Таймаут при отправке изображения"
+            dbbot.log_action(user_id, "edit", log_text, 0, balance)
+        except Exception as e:
+            raise e
 
         # Если у пользователя уже есть предыдущее
         # отредактированное изображение,
@@ -699,7 +725,6 @@ async def handle_chat_mode(
     balance: float,
 ):
     """Handle the chat mode functionality separately"""
-    print(f"we are in handle_chat_mode, user_message-{user_message}")
     from billing_utils import spend_coins
 
     try:
