@@ -58,6 +58,7 @@ def create_database():
             userid BIGINT NOT NULL,
             datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             mode VARCHAR(20),
+            event VARCHAR(10),
             text TEXT NOT NULL,
             cost INTEGER,
             balance INTEGER,
@@ -238,7 +239,41 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
         return False
 
 
-def log_action(userid, mode, text, cost, balance):
+def add_event_field_to_logs():
+    """
+    Добавляет поле event длиной 10 символов в таблицу logs.
+    Примечание: В PostgreSQL нельзя указать позицию колонки при добавлении.
+    """
+    try:
+        with psycopg2.connect(
+            dbname=DBNAME,
+            user=DBUSER,
+            password=DBPASSWORD,
+            host=DBHOST,
+            port=DBPORT
+        ) as conn:
+            with conn.cursor() as cur:
+                # Проверяем, существует ли уже столбец event
+                cur.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name='logs' AND column_name='event'
+                """)
+                if not cur.fetchone():
+                    # Добавляем столбец event с длиной 10 символов
+                    cur.execute("""
+                        ALTER TABLE logs
+                        ADD COLUMN event VARCHAR(10) AFTER mode
+                    """)
+                    conn.commit()
+                    print("Поле event успешно добавлено в таблицу logs.")
+                else:
+                    print("Поле event уже существует в таблице logs.")
+    except psycopg2.Error as e:
+        print(f"Ошибка при добавлении поля event: {e}")
+
+
+def log_action(userid, mode, event, text, cost, balance):
     """
     Добавляет запись в таблицу logs.
     :param userid: ID пользователя
@@ -256,10 +291,10 @@ def log_action(userid, mode, text, cost, balance):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO logs (userid, mode, text, cost, balance)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO logs (userid, mode, event, text, cost, balance)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (userid, mode, text, cost, balance)
+                    (userid, mode, event, text, cost, balance)
                 )
                 conn.commit()
                 print(f"""Лог записан для userid={userid}, режим {mode},
