@@ -1481,15 +1481,17 @@ class DocxRenderer:
             # Если не удалось создать график, добавляем сообщение об ошибке
             p = self.doc.add_paragraph()
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(
-                f"Ошибка при построении графика функции '{function_expr}': {e}"
-            )
+            log_text = (
+                f"Ошибка при построении графика функции (DocxRenderer)"
+                f" '{function_expr}': {e}"
+                )
+            run = p.add_run(log_text)
             run.font.italic = True
             from docx.shared import RGBColor
 
             run.font.color.rgb = RGBColor(255, 0, 0)  # Красный цвет для ошибки
 
-            print(f"Ошибка при рендеринге графика функции: {e}")
+            print(log_text)
 
         finally:
             # Очищаем matplotlib

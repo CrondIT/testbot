@@ -108,15 +108,14 @@ async def send_rtf_response(update, reply, image_url=None):
             )
 
     except Exception as e:
-        print("Ошибка обработки сообщения")
-        await update.message.reply_text(
-            f"Произошла ошибка при обработке вашего запроса {e}."
-        )
+        log_text = (f"Произошла ошибка при обработке вашего запроса {e}.")
+        await update.message.reply_text(log_text)
     finally:
         # Удалим временный файл
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"Временный файл удалён: {file_path}")
+                # print(f"Временный файл удалён: {file_path}")
         except Exception:
-            print(f"Не удалось удалить временный файл: {file_path}")
+            # print(f"Не удалось удалить временный файл: {file_path}")
+            pass

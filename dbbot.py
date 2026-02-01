@@ -173,7 +173,7 @@ def get_user(userid):
                 cur.execute(
                     """
                     SELECT id, userid, nickname, startdate, coindate,
-                           coins, giftdate, giftcoins
+                           coins, giftdate, giftcoins, note
                     FROM users
                     WHERE userid = %s;
                 """,

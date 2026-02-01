@@ -145,7 +145,8 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     # LOGGING ====================
     log_text = "Пользователь выбрал режим billing"
-    dbbot.log_action(user_id, "billing", log_text, 0, balance)
+    dbbot.log_action(user_id, "billing", log_text, 0, balance,
+                     "success", "bot>billing")
 
     welcome_text = f"""
         Ваш ID: {user_id}. Ваш баланс: {balance} монет
@@ -233,11 +234,6 @@ async def ai_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Activate file analysis mode"""
     user_id = update.effective_user.id
     user_modes[user_id] = "ai_file"
-
-    print(
-        f"we are in ai_file_command user_id {user_id}, "
-        f"user mode {user_modes[user_id]}"
-    )
 
     # Clear file data for this user
     if user_id in user_file_data:

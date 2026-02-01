@@ -462,14 +462,20 @@ async def handle_file_analysis_mode(
             if "too long" in error_msg.lower() or "token" in error_msg.lower():
                 # LOGGING ====================
                 log_text = f"Ошибка (ai_file): Сообщение длинное: {str(e)}"
-                dbbot.log_action(user_id, "ai_file", log_text, 0, balance)
+                dbbot.log_action(user_id, "ai_file", log_text, 0, balance,
+                                 "error",
+                                 "handle_utils>handle_file_analysis_mode"
+                                 )
                 await update.message.reply_text(
                     "⚠️ Длинное сообщение (ai_file).Cократите пожалуйста."
                 )
             else:
                 # LOGGING ====================
                 log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
-                dbbot.log_action(user_id, "ai_file", log_text, 0, balance)
+                dbbot.log_action(user_id, "ai_file", log_text, 0, balance,
+                                 "error",
+                                 "handle_utils>handle_file_analysis_mode"
+                                 )
                 await update.message.reply_text(
                     "⚠️ Ошибка при обращении к ChatGPT."
                 )
@@ -510,7 +516,8 @@ async def handle_image_create_mode(
             )
             # Логируем ошибку таймаута
             log_text = "Таймаут при отправке сгенерированного изображения"
-            dbbot.log_action(user_id, "image", log_text, 0, balance)
+            dbbot.log_action(user_id, "image", log_text, 0, balance,
+                             "error", "handle_utils>handle_image_create_mode")
             return
         except Exception as photo_error:
             raise photo_error
@@ -519,7 +526,8 @@ async def handle_image_create_mode(
     except Exception as e:
         # LOGGING ====================
         log_text = f"⚠️ {str(e)}"
-        dbbot.log_action(user_id, "image", log_text, 0, balance)
+        dbbot.log_action(user_id, "image", log_text, 0, balance,
+                         "error", "handle_utils>handle_image_create_mode")
         await update.message.reply_text(f"⚠️ {str(e)}")
 
 
@@ -627,7 +635,8 @@ async def handle_image_edit_mode(
             )
             # Логируем ошибку таймаута редактирования
             log_text = "Таймаут при редактировании изображения"
-            dbbot.log_action(user_id, "edit", log_text, 0, balance)
+            dbbot.log_action(user_id, "edit", log_text, 0, balance,
+                             "error", "handle_utils>handle_image_edit_mode")
             return
         except Exception as edit_error:
             if "timeout" in str(edit_error).lower():
@@ -638,7 +647,10 @@ async def handle_image_edit_mode(
                 )
                 # Логируем ошибку таймаута редактирования
                 log_text = f"Таймаут при редактировании: {str(edit_error)}"
-                dbbot.log_action(user_id, "edit", log_text, 0, balance)
+                dbbot.log_action(user_id, "edit", log_text, 0, balance,
+                                 "error",
+                                 "handle_utils>handle_image_edit_mode"
+                                 )
                 return
             else:
                 raise edit_error
@@ -664,7 +676,8 @@ async def handle_image_edit_mode(
             )
             # Логируем ошибку таймаута
             log_text = "Таймаут при отправке изображения"
-            dbbot.log_action(user_id, "edit", log_text, 0, balance)
+            dbbot.log_action(user_id, "edit", log_text, 0, balance,
+                             "error", "handle_utils>handle_image_edit_mode")
         except Exception as e:
             raise e
 
@@ -708,7 +721,8 @@ async def handle_image_edit_mode(
 
         # LOGGING ====================
         log_text = f"Ошибка при редактировании изображения: {str(e)}"
-        dbbot.log_action(user_id, "edit", log_text, 0, balance)
+        dbbot.log_action(user_id, "edit", log_text, 0, balance,
+                         "error", "handle_utils>handle_image_edit_mode")
         await update.message.reply_text(
             f"⚠️ Ошибка при редактировании изображения: {str(e)}"
         )
@@ -814,8 +828,8 @@ async def handle_chat_mode(
     except Exception as e:
         # LOGGING ====================
         log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
-        print(log_text)
-        dbbot.log_action(user_id, "chat", log_text, 0, balance)
+        dbbot.log_action(user_id, "chat", log_text, 0, balance,
+                         "error", "handle_utils>handle_chat_mode")
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
 
 
@@ -841,9 +855,9 @@ async def handle_voice_message(
         return user_message
     except Exception as e:
         # LOGGING ====================
-        log_text = "Не удалось распознать голосовое сообщение."
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
-        print("Ошибка транскрибации:", e)
+        log_text = f"Не удалось распознать голосовое сообщение. {e}"
+        dbbot.log_action(user_id, current_mode, log_text, 0, balance,
+                         "error", "handle_utils>handle_voice_message")
         await update.message.reply_text(
             "⚠️ Не удалось распознать голосовое сообщение."
         )
