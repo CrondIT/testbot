@@ -45,7 +45,8 @@ def create_database():
             coindate TIMESTAMP,
             coins INTEGER,
             giftdate TIMESTAMP,
-            giftcoins INTEGER
+            giftcoins INTEGER,
+            note VARCHAR(100)
             );
         """
         )
@@ -62,6 +63,7 @@ def create_database():
             text TEXT NOT NULL,
             cost INTEGER,
             balance INTEGER,
+            note VARCHAR(100),
             FOREIGN KEY (userid) REFERENCES users (userid) ON DELETE CASCADE
             );
         """
@@ -105,7 +107,10 @@ def check_user(userid):
         return False
 
 
-def create_user(userid, nickname, coins, giftcoins):
+def create_user(
+        userid, nickname, coins, giftcoins,
+        note=None
+        ):
     """
     Создаёт пользователя в таблице users.
     В поля startdate и giftdate заносится текущее время.
@@ -128,14 +133,13 @@ def create_user(userid, nickname, coins, giftcoins):
                     """
                     INSERT INTO users (
                         userid, startdate, giftdate, coindate,
-                        nickname, coins, giftcoins
+                        nickname, coins, giftcoins, note
                         )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (userid, now, now, now, nickname, coins, giftcoins),
+                    (userid, now, now, now, nickname, coins, giftcoins, note),
                 )
                 conn.commit()
-                print(f"Пользователь {userid} успешно создан.")
                 return True
 
     except psycopg2.IntegrityError as e:
@@ -189,6 +193,7 @@ def get_user(userid):
                         "coins": row[5],
                         "giftdate": row[6],
                         "giftcoins": row[7],
+                        "note": row[8],
                     }
                 else:
                     return None  # Пользователь не найден
@@ -227,11 +232,9 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
 
                 # Проверим, была ли обновлена хотя бы одна строка
                 if cur.rowcount == 0:
-                    print(f"Пользователь с userid={userid} не найден.")
                     return False
 
                 conn.commit()
-                print(f"Данные пользователя {userid} успешно обновлены.")
                 return True
 
     except psycopg2.Error as e:
@@ -239,41 +242,15 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
         return False
 
 
-def add_event_field_to_logs():
-    """
-    Добавляет поле event длиной 10 символов в таблицу logs.
-    Примечание: В PostgreSQL нельзя указать позицию колонки при добавлении.
-    """
-    try:
-        with psycopg2.connect(
-            dbname=DBNAME,
-            user=DBUSER,
-            password=DBPASSWORD,
-            host=DBHOST,
-            port=DBPORT
-        ) as conn:
-            with conn.cursor() as cur:
-                # Проверяем, существует ли уже столбец event
-                cur.execute("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_name='logs' AND column_name='event'
-                """)
-                if not cur.fetchone():
-                    # Добавляем столбец event с длиной 10 символов
-                    cur.execute("""
-                        ALTER TABLE logs
-                        ADD COLUMN event VARCHAR(10) AFTER mode
-                    """)
-                    conn.commit()
-                    print("Поле event успешно добавлено в таблицу logs.")
-                else:
-                    print("Поле event уже существует в таблице logs.")
-    except psycopg2.Error as e:
-        print(f"Ошибка при добавлении поля event: {e}")
-
-
-def log_action(userid, mode, event, text, cost, balance):
+def log_action(
+        userid,
+        mode,
+        text,
+        cost,
+        balance,
+        event="info",
+        note=None
+        ):
     """
     Добавляет запись в таблицу logs.
     :param userid: ID пользователя
@@ -286,18 +263,18 @@ def log_action(userid, mode, event, text, cost, balance):
             user=DBUSER,
             password=DBPASSWORD,
             host=DBHOST,
-            port=DBPORT
+            port=DBPORT,
         ) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO logs (userid, mode, event, text, cost, balance)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO logs (
+                        userid, mode, event, text, cost, balance, note
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (userid, mode, event, text, cost, balance)
+                    (userid, mode, event, text, cost, balance, note),
                 )
                 conn.commit()
-                print(f"""Лог записан для userid={userid}, режим {mode},
-                      движение {cost}, баланс {balance}""")
     except psycopg2.Error as e:
         print(f"Ошибка при записи в лог: {e}")

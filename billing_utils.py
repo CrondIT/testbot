@@ -35,7 +35,10 @@ def spend_coins(
     log_text = f""" Запрос: {user_message}
         Ответ: {reply}
         """
-    dbbot.log_action(user_id, current_mode, log_text, -cost, balance)
+    dbbot.log_action(
+        user_id, current_mode, log_text, -cost, balance,
+        "success", "billing_utils>spend_coins"
+        )
 
 
 async def check_user_coins(user_id: int, current_mode: str, context) -> tuple:
@@ -68,7 +71,10 @@ async def check_user_coins(user_id: int, current_mode: str, context) -> tuple:
             Стоимость: {cost}
             Баланс: {balance}
             """
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+        dbbot.log_action(
+            user_id, current_mode, log_text, 0, balance,
+            "success", "billing_utils>check_user_coins"
+        )
         await context.bot.send_message(
             chat_id=user_id,
             text=(
@@ -136,7 +142,8 @@ async def successful_payment_callback(
                 Баланс монет: {balance}
                 """
             dbbot.log_action(
-                user_id, current_mode, log_text, coins_to_add, balance
+                user_id, current_mode, log_text, coins_to_add, balance,
+                "success", "billing_utils>successful_payment_callback"
             )
             # Send success message
             await update.message.reply_text(
@@ -150,7 +157,10 @@ async def successful_payment_callback(
                 {coins_to_add} монет за звезды {stars_amount}
                 Баланс монет: {balance}
                 """
-            dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+            dbbot.log_action(user_id, current_mode, log_text, 0, balance,
+                             "error",
+                             "billing_utils>successful_payment_callback"
+                             )
             await update.message.reply_text(
                 "❌ Произошла ошибка при пополнении баланса. "
                 "Пожалуйста, свяжитесь с поддержкой."
@@ -161,7 +171,10 @@ async def successful_payment_callback(
             {coins_to_add} монет за звезды {stars_amount}
             Баланс монет: {balance}
             """
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance)
+        dbbot.log_action(user_id, current_mode, log_text, 0, balance,
+                         "error",
+                         "billing_utils>successful_payment_callback"
+                         )
         await update.message.reply_text(
             "❌ Неизвестный продукт. "
             "Пожалуйста, используйте кнопки в меню /billing."
