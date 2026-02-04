@@ -7,12 +7,20 @@ from models_config import client_edit_image
 
 
 async def edit_image(image_path: str, prompt: str) -> bytes:
-    image = Image.open(image_path)
+
+    # если не передано изображение то генерим изображение
+    if image_path:
+        image = Image.open(image_path)
+        contents = [image, prompt]
+        model = MODELS["edit"]
+    else:
+        contents = [prompt]
+        model = MODELS["image"]
 
     # Generate an image from a text prompt
     response = client_edit_image.models.generate_content(
-        model=MODELS["edit"],
-        contents=[image, prompt],
+        model=model,
+        contents=contents,
     )
 
     # Проверяем структуру ответа Gemini

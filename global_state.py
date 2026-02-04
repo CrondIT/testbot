@@ -28,7 +28,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.2-chat-latest",
-    "image": "dall-e-3",
+    "image": "gemini-2.5-flash-image",
     "edit": "gemini-2.5-flash-image",
     "ai_file": "gpt-5.2-chat-latest",
 }
