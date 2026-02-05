@@ -101,7 +101,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         Доступные команды:
         /ai - Чат с ИИ
         /ai_file - Анализ файлов
-        /ai_image - Генерация изображений
         /ai_edit - Редактирование изображений
         /billing - Управление счетом
 
@@ -145,8 +144,9 @@ async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     # LOGGING ====================
     log_text = "Пользователь выбрал режим billing"
-    dbbot.log_action(user_id, "billing", log_text, 0, balance,
-                     "success", "bot>billing")
+    dbbot.log_action(
+        user_id, "billing", log_text, 0, balance, "success", "bot>billing"
+    )
 
     welcome_text = f"""
         Ваш ID: {user_id}. Ваш баланс: {balance} монет
@@ -262,21 +262,11 @@ async def ai_file_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text)
 
 
-async def ai_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Активация режима генерации изображений"""
-    user_id = update.effective_user.id
-    user_modes[user_id] = "image"
-    # Очищаем данные редактирования при смене режима
-    if user_id in user_edit_data:
-        del user_edit_data[user_id]
-    await update.message.reply_text(
-        "🎨 Режим генерации изображений активирован. "
-        "Опишите, что вы хотите увидеть!"
-    )
-
-
 async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Активация режима редактирования изображений с использованием Gemini"""
+    """
+    Активация режима генерации и редактирования изображений
+    с использованием Gemini
+    """
     user_id = update.effective_user.id
     user_modes[user_id] = "edit"
     # Инициализируем данные для редактирования
@@ -285,14 +275,16 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "original_image": None,
     }
     help_text = """
-        🎭 Режим редактирования изображений активирован!
+        🎭 Режим генерации и редактирования изображений активирован!
 
         Как использовать:
+        1. Опишите какое изображение хотите создать
+        ИЛИ
         1. Отправьте изображение, которое хотите отредактировать
         2. Опишите, что нужно изменить
 
         Примеры запросов:
-        - "Добавь солнце на небо"
+        - "Нарисуй кота в стиле стимпанк на фоне горы"
         - "Измени цвет волос на рыжий"
         - "Убери человека с фона"
         - "Сделай стиль поп-арт"
@@ -302,26 +294,81 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Очистка контекста текущего режима"""
+    """Очистка контекста текущего режима или всех режимов"""
     user_id = update.effective_user.id
+
+    # Проверяем, есть ли аргументы в команде
+    args = context.args if context.args else []
+
     if user_id in user_modes and user_id in user_contexts:
-        current_mode = user_modes[user_id]
-        if current_mode in user_contexts[user_id]:
-            user_contexts[user_id][current_mode] = [
-                {
-                    "role": "system",
-                    "content": "Контекст очищен. Начните новый разговор.",
-                }
-            ]
-            await update.message.reply_text(
-                "🧹 Контекст текущего режима очищен!"
-            )
+        if "all" in args or "--all" in args:
+            # Очищаем контексты для всех режимов
+            if user_id in user_contexts:
+                # Сохраняем текущий режим для правильного системного сообщения
+                current_mode = (
+                    user_modes[user_id] if user_id in user_modes else None
+                )
+
+                # Очищаем все контексты для всех режимов
+                for mode in user_contexts[user_id].keys():
+                    user_contexts[user_id][mode] = [
+                        {
+                            "role": "system",
+                            "content": "Контекст очищен.",
+                        }
+                    ]
+
+                await update.message.reply_text(
+                    "🧹 Контекст всех режимов очищен!"
+                )
+            else:
+                await update.message.reply_text(
+                    "ℹ️ Нет активных контекстов для очистки."
+                )
         else:
-            await update.message.reply_text(
-                "ℹ️ Нет активного контекста для очистки."
+            # Очищаем контекст только текущего режима (поведение по умолчанию)
+            current_mode = (
+                user_modes[user_id] if user_id in user_modes else None
             )
+            if current_mode and current_mode in user_contexts[user_id]:
+                user_contexts[user_id][current_mode] = [
+                    {
+                        "role": "system",
+                        "content": "Контекст очищен. Начните новый разговор.",
+                    }
+                ]
+                await update.message.reply_text(
+                    f"🧹 Контекст текущего режима '{current_mode}' очищен!"
+                )
+            else:
+                await update.message.reply_text(
+                    "ℹ️ Нет активного контекста для очистки."
+                )
     else:
-        await update.message.reply_text("ℹ️ Сначала выберите режим работы.")
+        # Даже если режим не установлен,
+        # пробуем очистить хотя бы какой-то контекст
+        if user_id in user_contexts:
+            # Очищаем все известные режимы, если они существуют
+            cleared_any = False
+            for mode in list(user_contexts[user_id].keys()):
+                user_contexts[user_id][mode] = [
+                    {
+                        "role": "system",
+                        "content": "Контекст очищен. Начните новый разговор.",
+                    }
+                ]
+                cleared_any = True
+
+            if cleared_any:
+                await update.message.reply_text(
+                    "🧹 Контекст очищен (режим не определен, очищено все)!"
+                )
+            else:
+                await update.message.reply_text(
+                    "ℹ️ Нет активных контекстов для очистки."
+                )
+        else:
+            await update.message.reply_text("ℹ️ Сначала выберите режим.")
 
 
 def main():
@@ -331,7 +378,6 @@ def main():
     # Обработчики команд
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("ai", ai_command))
-    app.add_handler(CommandHandler("ai_image", ai_image_command))
     app.add_handler(CommandHandler("ai_edit", ai_edit_command))
     app.add_handler(CommandHandler("ai_file", ai_file_command))
     app.add_handler(CommandHandler("billing", billing))
@@ -379,8 +425,7 @@ def main():
 
     print("Multi-mode bot started!")
     print(
-        "Modes: /ai (OpenAI), /ai_image (DALL-E),"
-        " /ai_edit (Gemini), /ai_file (File Analysis)"
+        "Modes: /ai (OpenAI) " " /ai_edit (Gemini), /ai_file (File Analysis)"
     )
     app.run_polling(drop_pending_updates=True)
 

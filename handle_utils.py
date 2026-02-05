@@ -462,20 +462,30 @@ async def handle_file_analysis_mode(
             if "too long" in error_msg.lower() or "token" in error_msg.lower():
                 # LOGGING ====================
                 log_text = f"Ошибка (ai_file): Сообщение длинное: {str(e)}"
-                dbbot.log_action(user_id, "ai_file", log_text, 0, balance,
-                                 "error",
-                                 "handle_utils>handle_file_analysis_mode"
-                                 )
+                dbbot.log_action(
+                    user_id,
+                    "ai_file",
+                    log_text,
+                    0,
+                    balance,
+                    "error",
+                    "handle_utils>handle_file_analysis_mode",
+                )
                 await update.message.reply_text(
                     "⚠️ Длинное сообщение (ai_file).Cократите пожалуйста."
                 )
             else:
                 # LOGGING ====================
                 log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
-                dbbot.log_action(user_id, "ai_file", log_text, 0, balance,
-                                 "error",
-                                 "handle_utils>handle_file_analysis_mode"
-                                 )
+                dbbot.log_action(
+                    user_id,
+                    "ai_file",
+                    log_text,
+                    0,
+                    balance,
+                    "error",
+                    "handle_utils>handle_file_analysis_mode",
+                )
                 await update.message.reply_text(
                     "⚠️ Ошибка при обращении к ChatGPT."
                 )
@@ -485,50 +495,6 @@ async def handle_file_analysis_mode(
             "📁 Пожалуйста, сначала загрузите файл для анализа. "
             "Поддерживаются форматы: PDF, DOCX, TXT, XLSX, XLS"
         )
-
-
-async def handle_image_create_mode(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-    user_message: str,
-    cost: int,
-    coins: int,
-    giftcoins: int,
-    balance: float,
-):
-    """Handle the image mode functionality separately"""
-    from billing_utils import spend_coins
-
-    # Режим генерации изображений
-    await update.message.reply_text("🎨 Генерирую изображение...")
-
-    try:
-        image_url = await models_config.generate_image(user_message)
-        try:
-            await update.message.reply_photo(
-                image_url, caption=f"Сгенерировано по запросу: {user_message}"
-            )
-        except TimedOut:
-            await update.message.reply_text(
-                "⏰ Время ожидания отправки изображения истекло. "
-                "Пожалуйста, попробуйте снова."
-            )
-            # Логируем ошибку таймаута
-            log_text = "Таймаут при отправке сгенерированного изображения"
-            dbbot.log_action(user_id, "image", log_text, 0, balance,
-                             "error", "handle_utils>handle_image_create_mode")
-            return
-        except Exception as photo_error:
-            raise photo_error
-        # Списываем монеты и записываем лог
-        spend_coins(user_id, cost, coins, giftcoins, "image", user_message, "")
-    except Exception as e:
-        # LOGGING ====================
-        log_text = f"⚠️ {str(e)}"
-        dbbot.log_action(user_id, "image", log_text, 0, balance,
-                         "error", "handle_utils>handle_image_create_mode")
-        await update.message.reply_text(f"⚠️ {str(e)}")
 
 
 async def handle_image_edit_mode(
@@ -545,9 +511,11 @@ async def handle_image_edit_mode(
     from billing_utils import spend_coins
     import os
 
-    # Инициализируем переменную для пути к файлу
+    # Инициализируем переменные для путей к файлам
     file_path = None
+    edited_file_path = None
     file_ext = ".jpg"  # Телеграм все в jpeg превращает
+
     # Проверяем, есть ли фото в сообщении
     if update.message.photo:
         if user_id in edited_photo_id:
@@ -600,7 +568,7 @@ async def handle_image_edit_mode(
             # Проверяем, существует ли файл
             if not os.path.exists(file_path):
                 await update.message.reply_text(
-                  """
+                    """
                   🖼️ Предыдущее изображение не найдено.
                   Пожалуйста, отправьте новое изображение для редактирования.
                   """
@@ -608,21 +576,27 @@ async def handle_image_edit_mode(
                 return
         else:
             # Нет фото и нет ожидающего изображения или предыдущего изображения
-            # await update.message.reply_text(
-            #    "🖼️ Пожалуйста, отправьте изображение для редактирования."
-            # )
-            # return
-            file_path = None
+            # Если пользователь отправляет сообщение без изображения,
+            # это может быть запрос на генерацию изображения по описанию
+            if user_message:
+                # Это запрос на генерацию изображения по описанию
+                file_path = None
+            else:
+                file_path = None
     try:
         # Подсчитываем токены, использованные для запроса
         model_name = MODELS["edit"]
         token_count = token_utils.token_counter.count_openai_tokens(
             user_message, model_name
         )
-        # Отправляем сообщение о начале редактирования
-        await update.message.reply_text("🎨 Редактирую изображение...")
 
-        # Редактируем изображение
+        # Определяем тип операции: редактирование или генерация
+        operation_type = "генерации" if file_path is None else "редактирования"
+        await update.message.reply_text(
+            f"🎨 Выполняю {operation_type} изображения..."
+        )
+
+        # Редактируем или генерируем изображение
         try:
             edited_image_bytes = await image_edit_utils.edit_image(
                 file_path, user_message
@@ -635,8 +609,15 @@ async def handle_image_edit_mode(
             )
             # Логируем ошибку таймаута редактирования
             log_text = "Таймаут при редактировании изображения"
-            dbbot.log_action(user_id, "edit", log_text, 0, balance,
-                             "error", "handle_utils>handle_image_edit_mode")
+            dbbot.log_action(
+                user_id,
+                "edit",
+                log_text,
+                0,
+                balance,
+                "error",
+                "handle_utils>handle_image_edit_mode",
+            )
             return
         except Exception as edit_error:
             if "timeout" in str(edit_error).lower():
@@ -647,27 +628,38 @@ async def handle_image_edit_mode(
                 )
                 # Логируем ошибку таймаута редактирования
                 log_text = f"Таймаут при редактировании: {str(edit_error)}"
-                dbbot.log_action(user_id, "edit", log_text, 0, balance,
-                                 "error",
-                                 "handle_utils>handle_image_edit_mode"
-                                 )
+                dbbot.log_action(
+                    user_id,
+                    "edit",
+                    log_text,
+                    0,
+                    balance,
+                    "error",
+                    "handle_utils>handle_image_edit_mode",
+                )
                 return
             else:
                 raise edit_error
 
-        # Сохраняем отредактированное изображение
+        # Сохраняем отредактированное или сгенерированное изображение
         edited_file_path = (
             f"edited_{user_id}_{update.message.message_id}{file_ext}"
         )
         with open(edited_file_path, "wb") as f:
             f.write(edited_image_bytes)
 
-        # Отправляем отредактированное изображение пользователю
+        # Отправляем отредактированное
+        # или сгенерированное изображение пользователю
         try:
             with open(edited_file_path, "rb") as f:
+                caption_text = (
+                    f"Сгенерировано по запросу: {user_message}"
+                    if file_path is None
+                    else f"Отредактировано по запросу: {user_message}"
+                )
                 await update.message.reply_photo(
                     photo=f,
-                    caption=f"Отредактировано по запросу: {user_message}",
+                    caption=caption_text,
                 )
         except TimedOut:
             await update.message.reply_text(
@@ -676,8 +668,15 @@ async def handle_image_edit_mode(
             )
             # Логируем ошибку таймаута
             log_text = "Таймаут при отправке изображения"
-            dbbot.log_action(user_id, "edit", log_text, 0, balance,
-                             "error", "handle_utils>handle_image_edit_mode")
+            dbbot.log_action(
+                user_id,
+                "edit",
+                log_text,
+                0,
+                balance,
+                "error",
+                "handle_utils>handle_image_edit_mode",
+            )
         except Exception as e:
             raise e
 
@@ -688,7 +687,7 @@ async def handle_image_edit_mode(
             if os.path.exists(user_last_edited_images[user_id]):
                 os.remove(user_last_edited_images[user_id])
 
-        # Сохраняем путь к отредактированному
+        # Сохраняем путь к отредактированному или сгенерированному
         # изображению как последнее отредактированное
         user_last_edited_images[user_id] = edited_file_path
 
@@ -703,7 +702,7 @@ async def handle_image_edit_mode(
             f"Token usage: {token_count}",
         )
 
-        # Удаляем временные файлы
+        # Удаляем временные файлы (только исходное изображение, если оно было)
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
         # Удаляем из состояния ожидания, если оно там есть
@@ -715,14 +714,26 @@ async def handle_image_edit_mode(
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
+        # Удаляем созданный файл отредактированного
+        # изображения, если он существует
+        if edited_file_path and os.path.exists(edited_file_path):
+            os.remove(edited_file_path)
+
         # Удаляем из состояния ожидания, если оно там есть
         if user_id in user_edit_pending:
             del user_edit_pending[user_id]
 
         # LOGGING ====================
         log_text = f"Ошибка при редактировании изображения: {str(e)}"
-        dbbot.log_action(user_id, "edit", log_text, 0, balance,
-                         "error", "handle_utils>handle_image_edit_mode")
+        dbbot.log_action(
+            user_id,
+            "edit",
+            log_text,
+            0,
+            balance,
+            "error",
+            "handle_utils>handle_image_edit_mode",
+        )
         await update.message.reply_text(log_text)
 
 
@@ -826,8 +837,15 @@ async def handle_chat_mode(
     except Exception as e:
         # LOGGING ====================
         log_text = f"Ошибка при обращении к ChatGPT: {str(e)}"
-        dbbot.log_action(user_id, "chat", log_text, 0, balance,
-                         "error", "handle_utils>handle_chat_mode")
+        dbbot.log_action(
+            user_id,
+            "chat",
+            log_text,
+            0,
+            balance,
+            "error",
+            "handle_utils>handle_chat_mode",
+        )
         await update.message.reply_text("⚠️ Ошибка при обращении к ChatGPT.")
 
 
@@ -854,8 +872,15 @@ async def handle_voice_message(
     except Exception as e:
         # LOGGING ====================
         log_text = f"Не удалось распознать голосовое сообщение. {e}"
-        dbbot.log_action(user_id, current_mode, log_text, 0, balance,
-                         "error", "handle_utils>handle_voice_message")
+        dbbot.log_action(
+            user_id,
+            current_mode,
+            log_text,
+            0,
+            balance,
+            "error",
+            "handle_utils>handle_voice_message",
+        )
         await update.message.reply_text(
             "⚠️ Не удалось распознать голосовое сообщение."
         )
@@ -958,20 +983,6 @@ async def handle_message_or_voice(
     # Обработка режима редактирования изображений
     if current_mode == "edit":
         await handle_image_edit_mode(
-            update,
-            context,
-            user_id,
-            user_message,
-            cost,
-            coins,
-            giftcoins,
-            balance,
-        )
-        return
-
-    # Обработка в зависимости от режима
-    if current_mode == "image":
-        await handle_image_create_mode(
             update,
             context,
             user_id,
