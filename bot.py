@@ -13,6 +13,7 @@ from telegram.ext import (
     PreCheckoutQueryHandler,
     MessageHandler as TelegramMessageHandler,
 )
+from telegram.error import NetworkError, TimedOut
 from telegram.helpers import escape_markdown
 
 from global_state import (
@@ -371,9 +372,76 @@ async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("ℹ️ Сначала выберите режим.")
 
 
+async def error_handler(
+    update: object, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user_id = update.effective_user.id
+    """Global error handler."""
+    # Log the error before we do anything else
+    print(f"Update {update} caused error {context.error}")
+
+    # Log errors caused by updates
+    if isinstance(context.error, NetworkError):
+        print(f"Network error occurred: {context.error}")
+        # Don't raise the error to prevent stopping the bot
+        # Log the specific network error for debugging
+        import traceback
+        print(f"Network error details: {traceback.format_exc()}")
+        log_text = (
+            f"Network error occurred: {context.error}"
+            f"Network error details: {traceback.format_exc()}"
+            )
+        dbbot.log_action(
+                    user_id,
+                    "bot",
+                    log_text,
+                    0,
+                    0,
+                    "error",
+                    "bot>error_handler",
+                )
+        return
+    elif isinstance(context.error, TimedOut):
+        log_text = f"Timeout error occurred: {context.error}"
+        print(log_text)
+        # Don't raise the error to prevent stopping the bot
+        dbbot.log_action(
+                    user_id,
+                    "bot",
+                    log_text,
+                    0,
+                    0,
+                    "error",
+                    "bot>error_handler",
+                )
+        return
+    else:
+        # Log other errors
+        import traceback
+
+        print(f"Non-network error occurred: {context.error}")
+        print(traceback.format_exc())
+        log_text = (
+            f"Non-network error occurred: {context.error}"
+            f"Traceback: {traceback.format_exc()}"
+            )
+        dbbot.log_action(
+                    user_id,
+                    "bot",
+                    log_text,
+                    0,
+                    0,
+                    "error",
+                    "bot>error_handler",
+                )
+
+
 def main():
     check_pid()  # Проверка на дубль
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Add error handler
+    app.add_error_handler(error_handler)
 
     # Обработчики команд
     app.add_handler(CommandHandler("start", start))
@@ -427,7 +495,38 @@ def main():
     print(
         "Modes: /ai (OpenAI) " " /ai_edit (Gemini), /ai_file (File Analysis)"
     )
-    app.run_polling(drop_pending_updates=True)
+
+    # Run the bot with error handling for network issues
+    try:
+        app.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+            poll_interval=1.0,
+            timeout=20,
+            read_timeout=10,
+            connect_timeout=10,
+            pool_timeout=30,
+            bootstrap_retries=-1,
+            network_delay=1.0,
+        )
+    except KeyboardInterrupt:
+        print("Bot stopped by user")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        import traceback
+        log_text = (
+            f"An error occurred: {e}"
+            f"Traceback: {traceback.format_exc()}"
+            )
+        dbbot.log_action(
+                    None,
+                    "bot",
+                    log_text,
+                    0,
+                    0,
+                    "error",
+                    "bot>error_handler",
+                )
 
 
 if __name__ == "__main__":
