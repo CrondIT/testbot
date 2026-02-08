@@ -23,7 +23,9 @@ from global_state import (
     user_edit_pending,
     edited_photo_id,
     user_last_edited_images,
+    user_edit_images_queue,
     MAX_CONTEXT_MESSAGES,
+    MAX_REF_IMAGES,
     SYSTEM_PROMPTS,
     RTF_PROMPT,
     MODELS,
@@ -47,30 +49,6 @@ def initialize_user_context(user_id: int, current_mode: str):
         user_contexts[user_id][current_mode] = [
             {"role": "system", "content": system_message}
         ]
-
-
-# ==================== ФУНКЦИЯ НИГДЕ НЕ ИСПОЛЬЗУЕТЯ ====================
-async def get_last_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """находит последнее фото в чате"""
-    chat_id = update.effective_chat.id
-    try:
-        # Получаем историю сообщений (последние 15 сообщений)
-        messages = await context.bot.get_chat_history(chat_id, limit=15)
-
-        last_photo_id = None
-        # Ищем последнее сообщение с фото
-        async for message in messages:
-            if message.photo:
-                last_photo_id = message.photo[-1].file_id
-                break
-        if last_photo_id:
-            # Отправляем пользователю найденный file_id
-            return last_photo_id
-        else:
-            return None
-    except Exception as e:
-        print(f"Error in get_last_photo: {e}")
-        return None
 
 
 async def handle_file_analysis_mode(
@@ -539,10 +517,28 @@ async def handle_image_edit_mode(
         await file.download_to_drive(file_path)
 
         if not user_message:
-            # Сохраняем путь к файлу в состоянии ожидания
-            user_edit_pending[user_id] = file_path
+            # Добавляем изображение в очередь для последующего редактирования
+            if user_id not in user_edit_images_queue:
+                user_edit_images_queue[user_id] = []
+
+            # Проверяем, не превышено ли максимальное количество изображений
+            if len(user_edit_images_queue[user_id]) >= MAX_REF_IMAGES:
+                await update.message.reply_text(
+                    f"🖼️ Достигнуто максимальное количество изображений"
+                    f" ({MAX_REF_IMAGES}) для редактирования. "
+                    f"Пожалуйста, текстовый запрос для обработки изображений."
+                )
+                # Удаляем временный файл
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return
+
+            user_edit_images_queue[user_id].append(file_path)
+            images = len(user_edit_images_queue[user_id])
             await update.message.reply_text(
-                "✏️ Теперь укажите, что нужно выполнить с изображением."
+                f"🖼️ Изображение добавлено в очередь. "
+                f"Всего изображений в очереди: {images}/{MAX_REF_IMAGES}. "
+                f"Отправьте еще изображения или текстовый запрос"
             )
             return
     else:
@@ -575,14 +571,40 @@ async def handle_image_edit_mode(
                 )
                 return
         else:
-            # Нет фото и нет ожидающего изображения или предыдущего изображения
-            # Если пользователь отправляет сообщение без изображения,
-            # это может быть запрос на генерацию изображения по описанию
-            if user_message:
-                # Это запрос на генерацию изображения по описанию
+            # Нет фото в текущем сообщении
+            # Проверим, есть ли изображения в очереди
+            if (
+                user_message
+                and user_id in user_edit_images_queue
+                and len(user_edit_images_queue[user_id]) > 0
+            ):
+                # Используем изображения из очереди - file_path будет None,
+                # так как мы будем использовать все изображения
+                # из очереди в дальнейшем
                 file_path = None
+            elif user_message and user_id in user_last_edited_images:
+                # Используем последнее отредактированное изображение
+                file_path = user_last_edited_images[user_id]
+                # Проверяем, существует ли файл
+                if not os.path.exists(file_path):
+                    await update.message.reply_text(
+                        """
+                      🖼️ Предыдущее изображение не найдено.
+                      Пожалуйста, отправьте новое изображение
+                      для редактирования.
+                      """
+                    )
+                    return
             else:
-                file_path = None
+                # Нет фото и нет ожидающего изображения
+                # или предыдущего изображения
+                # Если пользователь отправляет сообщение без изображения,
+                # это может быть запрос на генерацию изображения по описанию
+                if user_message:
+                    # Это запрос на генерацию изображения по описанию
+                    file_path = None
+                else:
+                    file_path = None
     try:
         # Подсчитываем токены, использованные для запроса
         model_name = MODELS["edit"]
@@ -591,15 +613,54 @@ async def handle_image_edit_mode(
         )
 
         # Определяем тип операции: редактирование или генерация
-        operation_type = "генерации" if file_path is None else "редактирования"
+        operation_type = "генерация" if file_path is None else "редактирование"
+
+        # Отображаем пользовательский запрос и информацию о процессе сразу
         await update.message.reply_text(
-            f"🎨 Выполняю {operation_type} изображения..."
+            f"🎨 {operation_type.capitalize()} изображения начата...\n"
+            f"Запрос: {user_message}"
         )
+
+        # Подготовим массив изображений для редактирования
+        image_paths = []
+
+        # Если есть текущее изображение, добавим его в массив
+        if file_path:
+            image_paths.append(file_path)
+
+        # Если есть очередь изображений, добавим их в массив
+        if user_id in user_edit_images_queue:
+            # Фильтруем None значения из очереди
+            valid_paths = [
+                path
+                for path in user_edit_images_queue[user_id]
+                if path is not None and os.path.exists(path)
+            ]
+            image_paths.extend(valid_paths)
+
+        # Если есть последнее отредактированное изображение и оно не в списке,
+        # добавим его в массив
+        # (но только если пользователь отправляет текстовый запрос)
+        if (
+            user_message
+            and not file_path
+            and user_id in user_last_edited_images
+            and user_last_edited_images[user_id] not in image_paths
+        ):
+            # Проверим, существует ли файл
+            if os.path.exists(user_last_edited_images[user_id]):
+                image_paths.append(user_last_edited_images[user_id])
+
+        # Ограничиваем количество изображений до MAX_REF_IMAGES
+        if image_paths:
+            image_paths = image_paths[:MAX_REF_IMAGES]
+        else:
+            image_paths = []  # Убедимся, что image_paths всегда список
 
         # Редактируем или генерируем изображение
         try:
-            edited_image_bytes = await image_edit_utils.edit_image(
-                file_path, user_message
+            image_bytes, text_response = await image_edit_utils.edit_image(
+                image_paths, user_message
             )
         except TimedOut:
             await update.message.reply_text(
@@ -641,44 +702,49 @@ async def handle_image_edit_mode(
             else:
                 raise edit_error
 
-        # Сохраняем отредактированное или сгенерированное изображение
-        edited_file_path = (
-            f"edited_{user_id}_{update.message.message_id}{file_ext}"
-        )
-        with open(edited_file_path, "wb") as f:
-            f.write(edited_image_bytes)
+        # Проверяем, является ли ответ текстовым
+        if text_response is not None:
+            # Отправляем текстовый ответ пользователю
+            await update.message.reply_text(text_response)
+        else:
+            # Сохраняем отредактированное или сгенерированное изображение
+            edited_file_path = (
+                f"edited_{user_id}_{update.message.message_id}{file_ext}"
+            )
+            with open(edited_file_path, "wb") as f:
+                f.write(image_bytes)
 
-        # Отправляем отредактированное
-        # или сгенерированное изображение пользователю
-        try:
-            with open(edited_file_path, "rb") as f:
-                caption_text = (
-                    f"Сгенерировано по запросу: {user_message}"
-                    if file_path is None
-                    else f"Отредактировано по запросу: {user_message}"
+            # Отправляем отредактированное
+            # или сгенерированное изображение пользователю
+            try:
+                with open(edited_file_path, "rb") as f:
+                    caption_text = (
+                        f"Сгенерировано по запросу: {user_message}"
+                        if file_path is None
+                        else f"Отредактировано по запросу: {user_message}"
+                    )
+                    await update.message.reply_photo(
+                        photo=f,
+                        caption=caption_text,
+                    )
+            except TimedOut:
+                await update.message.reply_text(
+                    "⏰ Время ожидания отправки изображения истекло. "
+                    "Пожалуйста, попробуйте снова или с другим изображением."
                 )
-                await update.message.reply_photo(
-                    photo=f,
-                    caption=caption_text,
+                # Логируем ошибку таймаута
+                log_text = "Таймаут при отправке изображения"
+                dbbot.log_action(
+                    user_id,
+                    "edit",
+                    log_text,
+                    0,
+                    balance,
+                    "error",
+                    "handle_utils>handle_image_edit_mode",
                 )
-        except TimedOut:
-            await update.message.reply_text(
-                "⏰ Время ожидания отправки изображения истекло. "
-                "Пожалуйста, попробуйте снова или с другим изображением."
-            )
-            # Логируем ошибку таймаута
-            log_text = "Таймаут при отправке изображения"
-            dbbot.log_action(
-                user_id,
-                "edit",
-                log_text,
-                0,
-                balance,
-                "error",
-                "handle_utils>handle_image_edit_mode",
-            )
-        except Exception as e:
-            raise e
+            except Exception as e:
+                raise e
 
         # Если у пользователя уже есть предыдущее
         # отредактированное изображение,
@@ -687,9 +753,10 @@ async def handle_image_edit_mode(
             if os.path.exists(user_last_edited_images[user_id]):
                 os.remove(user_last_edited_images[user_id])
 
-        # Сохраняем путь к отредактированному или сгенерированному
-        # изображению как последнее отредактированное
-        user_last_edited_images[user_id] = edited_file_path
+        # Если был создан файл изображения, сохраняем путь к нему
+        # как последнее отредактированное изображение
+        if image_bytes is not None and edited_file_path:
+            user_last_edited_images[user_id] = edited_file_path
 
         # Списываем монеты и записываем лог
         spend_coins(
@@ -709,6 +776,14 @@ async def handle_image_edit_mode(
         if user_id in user_edit_pending:
             del user_edit_pending[user_id]
 
+        # Очищаем очередь изображений после обработки
+        if user_id in user_edit_images_queue:
+            # Удаляем все файлы из очереди
+            for img_path in user_edit_images_queue[user_id]:
+                if img_path is not None and os.path.exists(img_path):
+                    os.remove(img_path)
+            del user_edit_images_queue[user_id]
+
     except Exception as e:
         # Удаляем временные файлы даже при ошибке
         if file_path and os.path.exists(file_path):
@@ -716,12 +791,24 @@ async def handle_image_edit_mode(
 
         # Удаляем созданный файл отредактированного
         # изображения, если он существует
-        if edited_file_path and os.path.exists(edited_file_path):
+        if (
+            "edited_file_path" in locals()
+            and edited_file_path
+            and os.path.exists(edited_file_path)
+        ):
             os.remove(edited_file_path)
 
         # Удаляем из состояния ожидания, если оно там есть
         if user_id in user_edit_pending:
             del user_edit_pending[user_id]
+
+        # Очищаем очередь изображений при ошибке
+        if user_id in user_edit_images_queue:
+            # Удаляем все файлы из очереди
+            for img_path in user_edit_images_queue[user_id]:
+                if img_path is not None and os.path.exists(img_path):
+                    os.remove(img_path)
+            del user_edit_images_queue[user_id]
 
         # LOGGING ====================
         log_text = f"Ошибка при редактировании изображения: {str(e)}"

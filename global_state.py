@@ -15,10 +15,16 @@ edited_photo_id = {}  # Хранит ID отредактированного и�
 # Хранит путь к последнему отредактированному
 # изображению для каждого пользователя
 user_last_edited_images = {}
+# Хранит очередь изображений для редактирования для каждого пользователя
+user_edit_images_queue = {}
 MAX_CONTEXT_MESSAGES = 5
+MAX_REF_IMAGES = 5  # Максимальное количество изображений для редактирования
 
 # Загрузить переменные из файла .env
 load_dotenv()
+
+# Получаем id чата в телеграм для служебной информации
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # Получаем токены для разных режимов
 OPENAI_API_KEY_CHAT = os.getenv("OPENAI_API_KEY")
@@ -28,8 +34,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Модели для разных режимов
 MODELS = {
     "chat": "gpt-5.2-chat-latest",
-    "image": "gemini-2.5-flash-image",
-    "edit": "gemini-2.5-flash-image",
+    "image": "gemini-3-pro-image-preview",
+    "edit": "gemini-3-pro-image-preview",
     "ai_file": "gpt-5.2-chat-latest",
 }
 
@@ -53,6 +59,7 @@ def get_token_limit(model_name: str) -> int:
         "imagen-4.0-generate-001": 8192,
         "gemini-2.5-pro": 2097152,
         "gemini-2.5-flash-image": 32768,
+        "gemini-3-pro-image-preview": 32768,
         "gemini-1.5-pro": 1048576,
         "gemini-1.0-pro": 32768,
     }

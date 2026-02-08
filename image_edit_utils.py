@@ -6,12 +6,26 @@ from global_state import MODELS
 from models_config import client_edit_image
 
 
-async def edit_image(image_path: str, prompt: str) -> bytes:
+async def edit_image(image_paths, prompt: str):
+    """
+    Редактирует изображения или генерирует новое по описанию.
+    Возвращает кортеж: (image_bytes, text_response), где:
+    - image_bytes: байты изображения (или None, если ответ текстовый)
+    - text_response: текстовый ответ от модели
+    (или None, если ответ изображение)
 
-    # если не передано изображение то генерим изображение
-    if image_path:
-        image = Image.open(image_path)
-        contents = [image, prompt]
+    Args:
+        image_paths: список путей к изображениям (или None, если генерация)
+        prompt: текстовый запрос
+    """
+    # если не переданы изображения, то генерим изображение
+    if image_paths and isinstance(image_paths, list) and len(image_paths) > 0:
+        contents = []
+        for image_path in image_paths:
+            if image_path:  # Проверяем, что путь не None
+                image = Image.open(image_path)
+                contents.append(image)
+        contents.append(prompt)
         model = MODELS["edit"]
     else:
         contents = [prompt]
@@ -51,14 +65,14 @@ async def edit_image(image_path: str, prompt: str) -> bytes:
                         img.save(output_buffer, "JPEG", quality=95)
                         output_buffer.seek(0)
                         edited_image_bytes = output_buffer.getvalue()
-                        return edited_image_bytes
+                        return edited_image_bytes, None
                     elif hasattr(part, "text") and part.text is not None:
-                        print(part.text)
+                        return None, part.text
     else:
         # Альтернативная структура ответа Gemini
         for part in response.parts:
             if hasattr(part, "text") and part.text is not None:
-                print(part.text)
+                return None, part.text
             elif hasattr(part, "inline_data") and part.inline_data is not None:
                 # Получаем изображение из inline_data
                 image_bytes = part.inline_data.data
@@ -77,7 +91,7 @@ async def edit_image(image_path: str, prompt: str) -> bytes:
                 img.save(output_buffer, "JPEG", quality=95)
                 output_buffer.seek(0)
                 edited_image_bytes = output_buffer.getvalue()
-                return edited_image_bytes
+                return edited_image_bytes, None
 
     # Если не найдено изображение в ответе, выбрасываем исключение
     raise ValueError("Не удалось получить изображение из ответа модели")

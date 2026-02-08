@@ -16,11 +16,17 @@ from telegram.ext import (
 from telegram.error import NetworkError, TimedOut
 from telegram.helpers import escape_markdown
 
+
 from global_state import (
     user_contexts,
     user_modes,
     user_edit_data,
     user_file_data,
+    user_edit_pending,
+    edited_photo_id,
+    user_last_edited_images,
+    user_edit_images_queue,
+    
 )
 
 import dbbot
@@ -28,6 +34,8 @@ import models_config
 import billing_utils
 from handle_utils import handle_message_or_voice
 from message_utils import send_long_message
+from send_message_utils import send_telegram_message
+from global_state import TELEGRAM_CHAT_ID
 
 
 # Загрузить переменные из файла .env
@@ -89,12 +97,97 @@ async def models_openai(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    user_id = update.effective_user.id
+    """Обработчик команды /start -
+    показывает приветственное сообщение с кнопкой"""
+    # Создаем красивую кнопку "Старт"
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🚀 Начать работу с ботом", callback_data="welcome_start"
+            )
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    welcome_text = """
+        🤖 Добро пожаловать в мульти-режимного бота!
+
+        Этот бот поможет вам:
+        • Общаться с ИИ
+        • Анализировать файлы
+        • Редактировать изображения
+        • Управлять счетом
+
+        Нажмите кнопку ниже, чтобы начать работу!
+        """
+
+    await update.message.reply_text(welcome_text, reply_markup=reply_markup)
+
+
+async def welcome_start_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """Обработчик нажатия на кнопку 'Старт' -
+    регистрирует пользователя и показывает основное приветствие"""
+
+    query = update.callback_query
+    await query.answer()  # Подтверждаем нажатие
+
+    user_id = query.from_user.id
+    username = query.from_user.username or "Без имени"
+
+    # Проверяем, существует ли пользователь до вызова get_user
+    user_exists_before = dbbot.check_user(user_id)
     user = dbbot.get_user(user_id)
     coins = user["coins"] + user["giftcoins"]
 
+    # Если пользователь новый, отправляем сообщение в служебный чат
+    if not user_exists_before:
+        try:
+            username = query.from_user.username or "Без имени"
+            # Отправляем сообщение в служебный чат
+            if TELEGRAM_CHAT_ID and TELEGRAM_BOT_TOKEN:
+                service_message = (
+                    f"🤖 Новый пользователь зарегистрировался в боте!\n"
+                    f"ID: {user_id}\n"
+                    f"Username: @{username}\n"
+                    f"Время: {(
+                        query.message.date.strftime('%Y-%m-%d %H:%M:%S')
+                        if query.message and query.message.date else 'N/A'
+                        )}"
+                )
+
+                await send_telegram_message(
+                    bot_token=TELEGRAM_BOT_TOKEN,
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=service_message,
+                )
+            else:
+                # Логируем в базу данных, что не удалось отправить сообщение
+                log_text = "Не удалось отправить сообщение в служебный чат"
+                dbbot.log_action(
+                    user_id,
+                    "system",
+                    log_text,
+                    0,
+                    0,
+                    "warning",
+                    "bot>welcome_start_handler",
+                )
+        except Exception as e:
+            dbbot.log_action(
+                user_id,
+                "system",
+                f"Ошибка при отправке сообщения в служебный чат: {e}",
+                0,
+                0,
+                "error",
+                "bot>welcome_start_handler",
+            )
+
     user_modes[user_id] = "chat"  # Устанавливаем режим по умолчанию
+
+    # Редактируем сообщение, заменяя кнопку на основное приветствие
     welcome_text = f"""
         🤖 Добро пожаловать в мульти-режимного бота!
         Ваш ID: {user_id}, у Вас {coins} монета
@@ -107,7 +200,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         Выберите режим и начните общение!
         """
-    await update.message.reply_text(welcome_text)
+    await query.edit_message_text(text=welcome_text)
 
 
 async def billing(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -213,10 +306,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Раздел в работе!")
     elif data == "coins500rub":
         await query.edit_message_text("Раздел в работе!")
+    elif data == "welcome_start":
+        await query.edit_message_text("Добро пожаловать в бот!")
     else:
-        await query.edit_message_text(
-            "📋 История операций:\n- Пополнение: +10 \n- Использовано: -5 "
-        )
+        pass
 
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -270,6 +363,29 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     user_id = update.effective_user.id
     user_modes[user_id] = "edit"
+
+    # Очищаем все данные, связанные с редактированием изображений
+    if user_id in user_edit_data:
+        del user_edit_data[user_id]
+    if user_id in user_edit_pending:
+        del user_edit_pending[user_id]
+    if user_id in edited_photo_id:
+        del edited_photo_id[user_id]
+    if user_id in user_last_edited_images:
+        # Удаляем файл предыдущего отредактированного изображения
+        import os
+
+        if os.path.exists(user_last_edited_images[user_id]):
+            os.remove(user_last_edited_images[user_id])
+        del user_last_edited_images[user_id]
+    if user_id in user_edit_images_queue:
+        # Удаляем файлы из очереди изображений
+        import os
+        for img_path in user_edit_images_queue[user_id]:
+            if img_path is not None and os.path.exists(img_path):
+                os.remove(img_path)
+        del user_edit_images_queue[user_id]
+
     # Инициализируем данные для редактирования
     user_edit_data[user_id] = {
         "step": "waiting_image",  # waiting_image, waiting_prompt
@@ -375,65 +491,86 @@ async def clear_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def error_handler(
     update: object, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    user_id = update.effective_user.id
     """Global error handler."""
-    # Log the error before we do anything else
-    print(f"Update {update} caused error {context.error}")
+    import traceback
+
+    # error_text = f"Update {update} caused error {context.error}"
+
+    # Determine user_id if possible for logging to database
+    user_id = None
+    if update and hasattr(update, "effective_user") and update.effective_user:
+        user_id = update.effective_user.id
+    elif (
+        update
+        and hasattr(update, "message")
+        and update.message
+        and hasattr(update.message, "from_user")
+        and update.message.from_user
+    ):
+        user_id = update.message.from_user.id
+    elif (
+        update
+        and hasattr(update, "callback_query")
+        and update.callback_query
+        and hasattr(update.callback_query.from_user)
+        and update.callback_query.from_user
+    ):
+        user_id = update.callback_query.from_user.id
+
+    # Use a default user_id if we can't determine it from the update
+    if user_id is None:
+        user_id = 0  # Using 0 as a default value for system-level errors
 
     # Log errors caused by updates
     if isinstance(context.error, NetworkError):
-        print(f"Network error occurred: {context.error}")
+        network_error_text = f"Network error occurred: {context.error}"
         # Don't raise the error to prevent stopping the bot
         # Log the specific network error for debugging
-        import traceback
-        print(f"Network error details: {traceback.format_exc()}")
-        log_text = (
-            f"Network error occurred: {context.error}"
+        network_error_details = (
             f"Network error details: {traceback.format_exc()}"
-            )
+        )
+
+        # Log to database
         dbbot.log_action(
-                    user_id,
-                    "bot",
-                    log_text,
-                    0,
-                    0,
-                    "error",
-                    "bot>error_handler",
-                )
+            user_id,
+            "system",
+            f"{network_error_text}\n{network_error_details}",
+            0,
+            0,
+            "error",
+            "bot>error_handler",
+        )
         return
     elif isinstance(context.error, TimedOut):
-        log_text = f"Timeout error occurred: {context.error}"
-        print(log_text)
+        timeout_error_text = f"Timeout error occurred: {context.error}"
         # Don't raise the error to prevent stopping the bot
+
+        # Log to database
         dbbot.log_action(
-                    user_id,
-                    "bot",
-                    log_text,
-                    0,
-                    0,
-                    "error",
-                    "bot>error_handler",
-                )
+            user_id,
+            "system",
+            timeout_error_text,
+            0,
+            0,
+            "error",
+            "bot>error_handler",
+        )
         return
     else:
         # Log other errors
-        import traceback
+        other_error_text = f"Non-network error occurred: {context.error}"
+        error_traceback = traceback.format_exc()
 
-        print(f"Non-network error occurred: {context.error}")
-        print(traceback.format_exc())
-        log_text = (
-            f"Non-network error occurred: {context.error}"
-            f"Traceback: {traceback.format_exc()}"
-            )
+        # Log to database
         dbbot.log_action(
-                    user_id,
-                    "bot",
-                    log_text,
-                    0,
-                    0,
-                    "error",
-                    "bot>error_handler",
-                )
+            user_id,
+            "system",
+            f"{other_error_text}\n{error_traceback}",
+            0,
+            0,
+            "error",
+            "bot>error_handler",
+        )
 
 
 def main():
@@ -478,6 +615,10 @@ def main():
         )
     )
 
+    # Обработчик нажатия на кнопку "Старт"
+    app.add_handler(
+        CallbackQueryHandler(welcome_start_handler, pattern="welcome_start")
+    )
     # Обработчик нажатий на кнопки
     app.add_handler(CallbackQueryHandler(button_handler))
     # Обработчики для платежей через Telegram Stars
@@ -501,32 +642,26 @@ def main():
         app.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
-            poll_interval=1.0,
             timeout=20,
-            read_timeout=10,
-            connect_timeout=10,
-            pool_timeout=30,
             bootstrap_retries=-1,
-            network_delay=1.0,
         )
     except KeyboardInterrupt:
         print("Bot stopped by user")
     except Exception as e:
-        print(f"An error occurred: {e}")
         import traceback
+
         log_text = (
-            f"An error occurred: {e}"
-            f"Traceback: {traceback.format_exc()}"
-            )
+            f"An error occurred: {e}" f"Traceback: {traceback.format_exc()}"
+        )
         dbbot.log_action(
-                    None,
-                    "bot",
-                    log_text,
-                    0,
-                    0,
-                    "error",
-                    "bot>error_handler",
-                )
+            0,  # Используем 0 как значение по умолчанию для системных ошибок
+            "system",
+            log_text,
+            0,
+            0,
+            "error",
+            "main",
+        )
 
 
 if __name__ == "__main__":

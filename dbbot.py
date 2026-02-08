@@ -69,6 +69,21 @@ def create_database():
         """
         )
 
+        # Создание системного пользователя с userid=0, если он не существует
+        cur.execute(
+            """
+            INSERT INTO users (
+                userid, nickname, startdate, coindate,
+                coins, giftdate, giftcoins, note
+            )
+            VALUES (
+                0, 'System', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0,
+                CURRENT_TIMESTAMP, 0, 'System user for logging'
+            )
+            ON CONFLICT (userid) DO NOTHING;
+        """
+        )
+
         conn.commit()
         print("✅ Таблицы 'users' и 'logs' созданы или существуют. ", version)
         cur.close()
@@ -107,10 +122,7 @@ def check_user(userid):
         return False
 
 
-def create_user(
-        userid, nickname, coins, giftcoins,
-        note=None
-        ):
+def create_user(userid, nickname, coins, giftcoins, note=None):
     """
     Создаёт пользователя в таблице users.
     В поля startdate и giftdate заносится текущее время.
@@ -242,15 +254,7 @@ def change_all_coins(userid: int, coins: int, giftcoins: int) -> bool:
         return False
 
 
-def log_action(
-        userid,
-        mode,
-        text,
-        cost,
-        balance,
-        event="info",
-        note=None
-        ):
+def log_action(userid, mode, text, cost, balance, event="info", note=None):
     """
     Добавляет запись в таблицу logs.
     :param userid: ID пользователя
