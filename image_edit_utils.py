@@ -18,10 +18,13 @@ async def edit_image(image_paths, prompt: str):
         image_paths: список путей к изображениям (или None, если генерация)
         prompt: текстовый запрос
     """
+    # print(f"DEBUG edit_image: image_paths type:
+    # {type(image_paths)}, value: {image_paths}")
     # если не переданы изображения, то генерим изображение
     if image_paths and isinstance(image_paths, list) and len(image_paths) > 0:
         contents = []
         for image_path in image_paths:
+            # print(f"DEBUG: processing image_path: {image_path}")
             if image_path:  # Проверяем, что путь не None
                 image = Image.open(image_path)
                 contents.append(image)

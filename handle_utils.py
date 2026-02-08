@@ -630,13 +630,21 @@ async def handle_image_edit_mode(
 
         # Если есть очередь изображений, добавим их в массив
         if user_id in user_edit_images_queue:
-            # Фильтруем None значения из очереди
-            valid_paths = [
-                path
-                for path in user_edit_images_queue[user_id]
-                if path is not None and os.path.exists(path)
-            ]
-            image_paths.extend(valid_paths)
+            queue_images = user_edit_images_queue[user_id]
+            # print(f"DEBUG: queue_images type: {type(queue_images)},
+            # value: {queue_images}")
+            # Проверим, что queue_images - это список
+            if queue_images is not None and isinstance(queue_images, list):
+                # Фильтруем None значения из очереди
+                valid_paths = [
+                    path
+                    for path in queue_images
+                    if path is not None and os.path.exists(path)
+                ]
+                image_paths.extend(valid_paths)
+            else:
+                pass
+                # print(f"DEBUG: queue_images is not a list: {queue_images}")
 
         # Если есть последнее отредактированное изображение и оно не в списке,
         # добавим его в массив
