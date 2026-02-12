@@ -320,7 +320,7 @@ async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_edit_data:
         del user_edit_data[user_id]
     await update.message.reply_text(
-        "🔮 Режим чата (OpenAI) активирован. Задавайте вопросы!"
+        "🔮 Режим чата активирован. Задавайте вопросы!"
     )
 
 
