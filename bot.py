@@ -26,7 +26,6 @@ from global_state import (
     edited_photo_id,
     user_last_edited_images,
     user_edit_images_queue,
-    
 )
 
 import dbbot
@@ -260,46 +259,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "coins50stars":
         # Send invoice for 50 coins via Telegram Stars
-        await context.bot.send_invoice(
-            chat_id=query.message.chat_id,
-            title="Покупка монет",
-            description="50 монет за 50 ⭐️ Telegram Stars",
-            payload="coins50stars",
-            provider_token="",  # Empty for Telegram Stars
-            currency="XTR",  # Telegram Stars currency
-            prices=[{"label": "Монеты", "amount": 50}],  # 50 stars
-            max_tip_amount=0,
-            suggested_tip_amounts=[],
-            start_parameter="buy_coins",
-        )
+        await query.edit_message_text("Раздел в работе!")
     elif data == "coins100stars":
         # Send invoice for 100 coins via Telegram Stars
-        await context.bot.send_invoice(
-            chat_id=query.message.chat_id,
-            title="Покупка монет",
-            description="100 монет за 100 ⭐️ Telegram Stars",
-            payload="coins100stars",
-            provider_token="",  # Empty for Telegram Stars
-            currency="XTR",  # Telegram Stars currency
-            prices=[{"label": "Монеты", "amount": 100}],  # 100 stars
-            max_tip_amount=0,
-            suggested_tip_amounts=[],
-            start_parameter="buy_coins",
-        )
+        await query.edit_message_text("Раздел в работе!")
     elif data == "coins500stars":
         # Send invoice for 500 coins via Telegram Stars
-        await context.bot.send_invoice(
-            chat_id=query.message.chat_id,
-            title="Покупка монет",
-            description="500 монет за 500 ⭐️ Telegram Stars",
-            payload="coins500stars",
-            provider_token="",  # Empty for Telegram Stars
-            currency="XTR",  # Telegram Stars currency
-            prices=[{"label": "Монеты", "amount": 500}],  # 500 stars
-            max_tip_amount=0,
-            suggested_tip_amounts=[],
-            start_parameter="buy_coins",
-        )
+        await query.edit_message_text("Раздел в работе!")
     elif data == "coins50rub":
         await query.edit_message_text("Раздел в работе!")
     elif data == "coins100rub":
