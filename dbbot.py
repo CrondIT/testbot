@@ -39,7 +39,7 @@ def create_database():
             """
             CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
-            userid INTEGER UNIQUE NOT NULL,
+            userid BIGINT UNIQUE NOT NULL,
             nickname VARCHAR(20),
             startdate TIMESTAMP,
             coindate TIMESTAMP,
