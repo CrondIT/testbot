@@ -46,8 +46,34 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN2")
 client_chat = models_config.client_chat
 client_image = models_config.client_image
 
-# --- Файл для хранения PID для котроля что процесс уже запущен- ---
+# --- Файл для хранения PID для контроля что процесс уже запущен ---
 PID_FILE = "bot.pid"
+
+
+def is_process_running(pid: int) -> bool:
+    """Проверяет, запущен ли процесс с указанным PID."""
+    import sys
+    if sys.platform == "win32":
+        # На Windows используем tasklist
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            # Если процесс найден, вывод содержит PID
+            return str(pid) in result.stdout
+        except subprocess.SubprocessError:
+            return False
+    else:
+        # На Unix-системах используем os.kill
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
 
 
 def check_pid():
@@ -55,10 +81,14 @@ def check_pid():
         with open(PID_FILE, "r") as f:
             try:
                 pid = int(f.read().strip())
-                # Проверяем, жив ли процесс
-                os.kill(pid, 0)
-                print(f"❌ Бот уже запущен (PID: {pid}). Завершаем.")
-                exit(1)
+                # Проверяем, существует ли процесс
+                if is_process_running(pid):
+                    print(f"❌ Бот уже запущен (PID: {pid}). Завершаем.")
+                    exit(1)
+                else:
+                    # Процесс не существует, удаляем stale PID файл
+                    os.remove(PID_FILE)
+                    print(f"🗑️ Удалён устаревший PID файл (процесс {pid} не найден)")
             except (OSError, ValueError):
                 # Процесс не существует — можно запускаться
                 pass

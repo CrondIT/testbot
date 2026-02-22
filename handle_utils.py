@@ -965,20 +965,43 @@ async def handle_voice_message(
         os.remove(file_path)
         return user_message
     except Exception as e:
-        # LOGGING ====================
-        log_text = f"Не удалось распознать голосовое сообщение. {e}"
-        dbbot.log_action(
-            user_id,
-            current_mode,
-            log_text,
-            0,
-            balance,
-            "error",
-            "handle_utils>handle_voice_message",
-        )
-        await update.message.reply_text(
-            "⚠️ Не удалось распознать голосовое сообщение."
-        )
+        error_text = str(e)
+        # Проверяем, не ошибка ли это квоты OpenAI
+        if "insufficient_quota" in error_text or "429" in error_text:
+            # LOGGING ====================
+            log_text = (
+                f"Не удалось распознать голосовое сообщение. "
+                f"Квота OpenAI исчерпана. {e}"
+            )
+            dbbot.log_action(
+                user_id,
+                current_mode,
+                log_text,
+                0,
+                balance,
+                "error",
+                "handle_utils>handle_voice_message",
+            )
+            await update.message.reply_text(
+                "⚠️ Временно не удалось распознать голосовое сообщение. "
+                "Технические неполадки на стороне провайдера. "
+                "Пожалуйста, используйте текстовые сообщения."
+            )
+        else:
+            # LOGGING ====================
+            log_text = f"Не удалось распознать голосовое сообщение. {e}"
+            dbbot.log_action(
+                user_id,
+                current_mode,
+                log_text,
+                0,
+                balance,
+                "error",
+                "handle_utils>handle_voice_message",
+            )
+            await update.message.reply_text(
+                "⚠️ Не удалось распознать голосовое сообщение."
+            )
         return None
 
 
