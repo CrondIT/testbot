@@ -88,7 +88,7 @@ def check_pid():
                 else:
                     # Процесс не существует, удаляем stale PID файл
                     os.remove(PID_FILE)
-                    print(f"🗑️ Удалён устаревший PID файл (процесс {pid} не найден)")
+                    print(f"🗑️ Удалён устаревший PID файл ({pid} не найден)")
             except (OSError, ValueError):
                 # Процесс не существует — можно запускаться
                 pass
