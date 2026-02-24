@@ -490,8 +490,6 @@ async def error_handler(
     """Global error handler."""
     import traceback
 
-    # error_text = f"Update {update} caused error {context.error}"
-
     # Determine user_id if possible for logging to database
     user_id = None
     if update and hasattr(update, "effective_user") and update.effective_user:
@@ -517,9 +515,12 @@ async def error_handler(
     if user_id is None:
         user_id = 0  # Using 0 as a default value for system-level errors
 
+    # Get error safely - context.error can be None for some network issues
+    error = context.error if hasattr(context, 'error') else None
+
     # Log errors caused by updates
-    if isinstance(context.error, NetworkError):
-        network_error_text = f"Network error occurred: {context.error}"
+    if error is not None and isinstance(error, NetworkError):
+        network_error_text = f"Network error occurred: {error}"
         # Don't raise the error to prevent stopping the bot
         # Log the specific network error for debugging
         network_error_details = (
@@ -537,8 +538,8 @@ async def error_handler(
             "bot>error_handler",
         )
         return
-    elif isinstance(context.error, TimedOut):
-        timeout_error_text = f"Timeout error occurred: {context.error}"
+    elif error is not None and isinstance(error, TimedOut):
+        timeout_error_text = f"Timeout error occurred: {error}"
         # Don't raise the error to prevent stopping the bot
 
         # Log to database
@@ -552,9 +553,25 @@ async def error_handler(
             "bot>error_handler",
         )
         return
+    elif error is not None and "Conflict" in str(error):
+        # Special handling for Conflict errors (another getUpdates request)
+        conflict_text = (
+            f"⚠️ Conflict error (другой экземпляр бота активен): {error}"
+        )
+        dbbot.log_action(
+            user_id,
+            "system",
+            conflict_text,
+            0,
+            0,
+            "warning",
+            "bot>error_handler",
+        )
+        return
     else:
-        # Log other errors
-        other_error_text = f"Non-network error occurred: {context.error}"
+        # Log other errors or when error is None
+        error_str = str(error) if error is not None else "Unknown error (context.error is None)"
+        other_error_text = f"Non-network error occurred: {error_str}"
         error_traceback = traceback.format_exc()
 
         # Log to database
@@ -635,11 +652,19 @@ def main():
 
     # Run the bot with error handling for network issues
     try:
+        # Небольшая задержка перед запуском для избежания конфликта
+        # с предыдущим getUpdates запросом
+        import time
+        print("⏳ Ожидание перед запуском (защита от Conflict)...")
+        time.sleep(2)
+
         app.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
-            timeout=20,
+            timeout=30,
             bootstrap_retries=-1,
+            # Явно указываем retry_after для обработки Conflict ошибок
+            retry_after=3,
         )
     except KeyboardInterrupt:
         print("Bot stopped by user")
@@ -647,7 +672,8 @@ def main():
         import traceback
 
         log_text = (
-            f"An error occurred: {e}" f"Traceback: {traceback.format_exc()}"
+            f"An error occurred: {e}\n"
+            f"Traceback: {traceback.format_exc()}"
         )
         dbbot.log_action(
             0,  # Используем 0 как значение по умолчанию для системных ошибок
