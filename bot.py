@@ -53,9 +53,11 @@ PID_FILE = "bot.pid"
 def is_process_running(pid: int) -> bool:
     """Проверяет, запущен ли процесс с указанным PID."""
     import sys
+
     if sys.platform == "win32":
         # На Windows используем tasklist
         import subprocess
+
         try:
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV"],
@@ -377,6 +379,7 @@ async def ai_edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in user_edit_images_queue:
         # Удаляем файлы из очереди изображений
         import os
+
         for img_path in user_edit_images_queue[user_id]:
             if img_path is not None and os.path.exists(img_path):
                 os.remove(img_path)
@@ -516,7 +519,7 @@ async def error_handler(
         user_id = 0  # Using 0 as a default value for system-level errors
 
     # Get error safely - context.error can be None for some network issues
-    error = context.error if hasattr(context, 'error') else None
+    error = context.error if hasattr(context, "error") else None
 
     # Log errors caused by updates
     if error is not None and isinstance(error, NetworkError):
@@ -570,7 +573,11 @@ async def error_handler(
         return
     else:
         # Log other errors or when error is None
-        error_str = str(error) if error is not None else "Unknown error (context.error is None)"
+        error_str = (
+            str(error)
+            if error is not None
+            else "Unknown error (context.error is None)"
+        )
         other_error_text = f"Non-network error occurred: {error_str}"
         error_traceback = traceback.format_exc()
 
@@ -655,6 +662,7 @@ def main():
         # Небольшая задержка перед запуском для избежания конфликта
         # с предыдущим getUpdates запросом
         import time
+
         print("⏳ Ожидание перед запуском (защита от Conflict)...")
         time.sleep(2)
 
@@ -672,8 +680,7 @@ def main():
         import traceback
 
         log_text = (
-            f"An error occurred: {e}\n"
-            f"Traceback: {traceback.format_exc()}"
+            f"An error occurred: {e}\n" f"Traceback: {traceback.format_exc()}"
         )
         dbbot.log_action(
             0,  # Используем 0 как значение по умолчанию для системных ошибок
