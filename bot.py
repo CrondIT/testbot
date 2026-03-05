@@ -707,10 +707,8 @@ def main():
 
         app.run_polling(
             drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES,
             timeout=30,
             bootstrap_retries=-1,
-            # Явно указываем retry_after для обработки Conflict ошибок
             retry_after=3,
         )
     except KeyboardInterrupt:
