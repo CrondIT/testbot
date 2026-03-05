@@ -709,7 +709,6 @@ def main():
             drop_pending_updates=True,
             timeout=30,
             bootstrap_retries=-1,
-            retry_after=3,
         )
     except KeyboardInterrupt:
         print("Bot stopped by user")
