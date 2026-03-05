@@ -1,6 +1,7 @@
 """
 Global variables module for the entire project
 """
+
 import os
 from dotenv import load_dotenv
 
@@ -18,7 +19,7 @@ user_last_edited_images = {}
 # Хранит очередь изображений для редактирования для каждого пользователя
 user_edit_images_queue = {}
 MAX_CONTEXT_MESSAGES = 5
-MAX_REF_IMAGES = 5  # Максимальное количество изображений для редактирования
+MAX_REF_IMAGES = 6  # Максимальное количество изображений для редактирования
 
 # Загрузить переменные из файла .env
 load_dotenv()
@@ -203,3 +204,254 @@ DOCUMENT_JSON_SCHEMA = """
     ]
     }
     """
+
+
+# ==================== Redis Integration ====================
+# Функции-обёртки для работы с Redis (если включён)
+
+_use_redis = os.getenv("USE_REDIS", "false").lower() == "true"
+_queue = None
+
+
+def _get_queue():
+    """Ленивая инициализация очереди Redis"""
+    global _queue, _use_redis
+    if _queue is None and _use_redis:
+        try:
+            from redis_queue import RedisQueue
+
+            _queue = RedisQueue()
+        except Exception as e:
+            print(f"⚠️ Не удалось инициализировать Redis очередь: {e}")
+            _use_redis = False
+    return _queue
+
+
+def get_user_context(user_id: int, mode: str) -> list:
+    """
+    Получает контекст пользователя для указанного режима.
+    Сначала пробует из Redis, затем из памяти.
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            context = q.get_user_state(user_id, f"context_{mode}")
+            if context is not None:
+                return context
+
+    # Fallback к памяти
+    if user_id in user_contexts and mode in user_contexts[user_id]:
+        return user_contexts[user_id][mode]
+
+    # Возвращаем дефолтный контекст
+    system_message = SYSTEM_PROMPTS.get(mode, "You are a helpful assistant.")
+    return [{"role": "system", "content": system_message}]
+
+
+def set_user_context(user_id: int, mode: str, context: list):
+    """
+    Сохраняет контекст пользователя для указанного режима.
+    Сохраняет и в Redis (если включён), и в память.
+    """
+    # Сохраняем в память
+    if user_id not in user_contexts:
+        user_contexts[user_id] = {}
+    user_contexts[user_id][mode] = context
+
+    # Сохраняем в Redis
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, f"context_{mode}", context)
+
+
+def get_user_mode(user_id: int) -> str:
+    """Получает текущий режим пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            mode = q.get_user_state(user_id, "mode")
+            if mode:
+                return mode
+    return user_modes.get(user_id, "chat")
+
+
+def set_user_mode(user_id: int, mode: str):
+    """Устанавливает текущий режим пользователя"""
+    user_modes[user_id] = mode
+
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "mode", mode)
+
+
+def get_user_file_data(user_id: int) -> dict:
+    """Получает данные о файлах пользователя"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            data = q.get_user_state(user_id, "files")
+            if data:
+                return data
+    return user_file_data.get(user_id, {})
+
+
+def set_user_file_data(user_id: int, data: dict):
+    """Сохраняет данные о файлах пользователя"""
+    user_file_data[user_id] = data
+
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "files", data)
+
+
+def get_user_edit_data(user_id: int) -> dict:
+    """Получает данные для редактирования изображений"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            data = q.get_user_state(user_id, "edit")
+            if data:
+                return data
+    return user_edit_data.get(user_id, {})
+
+
+def set_user_edit_data(user_id: int, data: dict):
+    """Сохраняет данные для редактирования изображений"""
+    user_edit_data[user_id] = data
+
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "edit", data)
+
+
+def get_user_edit_queue(user_id: int) -> list:
+    """Получает очередь изображений для редактирования"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            queue = q.get_user_state(user_id, "edit_queue")
+            if queue:
+                return queue
+    return user_edit_images_queue.get(user_id, [])
+
+
+def set_user_edit_queue(user_id: int, queue: list):
+    """Сохраняет очередь изображений для редактирования"""
+    user_edit_images_queue[user_id] = queue
+
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.set_user_state(user_id, "edit_queue", queue)
+
+
+def clear_user_data(user_id: int):
+    """Очищает все данные пользователя"""
+    # Очищаем память
+    for storage in [
+        user_contexts,
+        user_file_data,
+        user_edit_data,
+        user_edit_images_queue,
+        user_edit_pending,
+        edited_photo_id,
+        user_last_edited_images,
+    ]:
+        if user_id in storage:
+            del storage[user_id]
+
+    # Очищаем Redis
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            q.delete_user_state(user_id)
+
+
+def check_rate_limit(
+    user_id: int, action: str, max_requests: int = 10, window_seconds: int = 60
+) -> bool:
+    """
+    Проверяет rate limit для пользователя.
+
+    Args:
+        user_id: ID пользователя
+        action: Тип действия (chat, image, file)
+        max_requests: Максимум запросов в окно
+        window_seconds: Размер окна в секундах
+
+    Returns:
+        True если запрос разрешён
+    """
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            return q.check_rate_limit(
+                user_id, action, max_requests, window_seconds
+            )
+
+    # Без Redis rate limiting не работает
+    return True
+
+
+def get_queue_stats() -> dict:
+    """Получает статистику очередей"""
+    if _use_redis:
+        q = _get_queue()
+        if q:
+            return q.get_stats()
+    return {"error": "Redis not enabled"}
+
+
+def enqueue_task(
+    queue_type: str, task_data: dict, priority: str = "normal"
+) -> str:
+    """
+    Добавляет задачу в очередь Redis.
+
+    Args:
+        queue_type: Тип задачи (chat, file, image:gen, image:edit)
+        task_data: Данные задачи
+        priority: Приоритет (high, normal, low)
+
+    Returns:
+        task_id: Идентификатор задачи
+    """
+    if not _use_redis:
+        raise RuntimeError("Redis не включён (USE_REDIS=false)")
+
+    q = _get_queue()
+    if not q:
+        raise RuntimeError("Не удалось подключиться к Redis")
+
+    return q.enqueue(queue_type, task_data, priority)
+
+
+def get_task_result(task_id: str, wait: bool = False, timeout: int = 30):
+    """
+    Получает результат задачи.
+
+    Args:
+        task_id: Идентификатор задачи
+        wait: Ждать ли завершения
+        timeout: Максимальное время ожидания
+    """
+    if not _use_redis:
+        raise RuntimeError("Redis не включён")
+
+    q = _get_queue()
+    if not q:
+        raise RuntimeError("Не удалось подключиться к Redis")
+
+    return q.get_task_result(task_id, wait, timeout)
+
+
+def close_redis_connection():
+    """Закрывает подключение к Redis"""
+    global _queue
+    if _queue:
+        _queue.close()
+        _queue = None
