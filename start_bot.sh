@@ -130,14 +130,11 @@ start_session() {
     fi
     
     # Запускаем воркеры
+    # Запуск воркеров - используйте правильную нумерацию панелей
     for i in $(seq 0 $((NUM_WORKERS - 1))); do
-        local pane=$i
-        if [ $i -ge 2 ]; then
-            pane=$((i - 2))
-        fi
-        tmux send-keys -t $SESSION:0.$pane \
+        tmux send-keys -t $SESSION:0.$i \
             "cd $PROJECT_DIR && $PYTHON worker.py --id $i" Enter
-        log_success "Воркер $i запущен"
+        log_success "Воркер $i запущен в панель $i"
     done
     
     # Окно 1: Listener
