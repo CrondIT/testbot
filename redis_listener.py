@@ -17,6 +17,7 @@ from telegram.error import TelegramError
 from redis_queue import RedisQueue, RedisQueueError
 from redis_config import REDIS_PREFIX
 import dbbot
+from message_utils import truncate_caption
 
 # Настройка логирования
 logging.basicConfig(
@@ -215,18 +216,26 @@ class RedisListener:
         try:
             if image_url:
                 # Отправляем изображение
+                caption = truncate_caption(
+                    f"Готово за {processing_time:.1f}с",
+                    prefix="✅ "
+                )
                 await self.bot.send_photo(
                     chat_id=user_id,
                     photo=image_url,
-                    caption=f"✅ Готово за {processing_time:.1f}с",
+                    caption=caption,
                 )
             elif edited_image_path and os.path.exists(edited_image_path):
                 # Отправляем отредактированное изображение
+                caption = truncate_caption(
+                    f"Готово за {processing_time:.1f}с",
+                    prefix="✅ "
+                )
                 with open(edited_image_path, "rb") as f:
                     await self.bot.send_photo(
                         chat_id=user_id,
                         photo=f,
-                        caption=f"✅ Готово за {processing_time:.1f}с",
+                        caption=caption,
                     )
             elif response_text:
                 # Отправляем текст

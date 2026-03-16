@@ -32,7 +32,7 @@ from global_state import (
     COST_PER_PROMPT,
     COST_PER_ANSWER,
 )
-from message_utils import send_long_message
+from message_utils import send_long_message, truncate_caption
 from pdf_utils import send_pdf_response
 from docx_utils import send_docx_response
 from xlsx_utils import send_xlsx_response
@@ -751,11 +751,14 @@ async def handle_image_edit_mode(
             # или сгенерированное изображение пользователю
             try:
                 with open(edited_file_path, "rb") as f:
-                    caption_text = (
-                        f"Сгенерировано по запросу: {user_message}"
+                    # Формируем caption с умным сокращением
+                    # Telegram ограничивает caption 1024 символами
+                    prefix = (
+                        "Сгенерировано по запросу: "
                         if file_path is None
-                        else f"Отредактировано по запросу: {user_message}"
+                        else "Отредактировано по запросу: "
                     )
+                    caption_text = truncate_caption(user_message, prefix=prefix)
                     await update.message.reply_photo(
                         photo=f,
                         caption=caption_text,
