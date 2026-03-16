@@ -29,6 +29,8 @@ from global_state import (
     SYSTEM_PROMPTS,
     RTF_PROMPT,
     MODELS,
+    COST_PER_PROMPT,
+    COST_PER_ANSWER,
 )
 from message_utils import send_long_message
 from pdf_utils import send_pdf_response
@@ -341,10 +343,33 @@ async def handle_file_analysis_mode(
                 + truncated_history
                 + [{"role": "user", "content": augmented_question}]
             )
+
+            # Расчет количества токенов для промпта (запрос к модели)
+            prompt_tokens = (
+                token_utils.token_counter.count_openai_messages_tokens(
+                    full_context, model_name
+                )
+            )
+
             reply = await models_config.ask_gpt51_with_web_search(
                 context_history=full_context,
                 enable_web_search=False,
             )
+
+            # Расчет количества токенов для ответа модели
+            response_tokens = token_utils.token_counter.count_openai_tokens(
+                reply, model_name
+            )
+
+            # Расчет стоимости на основе токенов
+            cost_per_prompt = COST_PER_PROMPT.get("ai_file", 0)
+            cost_per_answer = COST_PER_ANSWER.get("ai_file", 0)
+            cost = round(
+                (prompt_tokens * cost_per_prompt / 1000000) +
+                (response_tokens * cost_per_answer / 1000000)
+            )
+            if cost == 0:
+                cost = 1
 
             # reply = response.choices[0].message.content
 
@@ -422,7 +447,7 @@ async def handle_file_analysis_mode(
             # Списываем монеты и записываем лог
             from billing_utils import check_user_coins
 
-            user_data, coins, giftcoins, balance, cost = (
+            user_data, coins, giftcoins, balance, _ = (
                 await check_user_coins(user_id, "ai_file", context)
             )
             spend_coins(
@@ -432,7 +457,7 @@ async def handle_file_analysis_mode(
                 giftcoins,
                 "ai_file",
                 user_message,
-                reply,  # Сохраняем оригинальный ответ в логах
+                f"{reply}, tokens (in/out): {prompt_tokens}/{response_tokens}",
             )
         except Exception as e:
             # Обработка ошибки "Message is too long" и других
@@ -885,10 +910,30 @@ async def handle_chat_mode(
         if len(user_context) > MAX_CONTEXT_MESSAGES:
             user_context = user_context[-MAX_CONTEXT_MESSAGES:]
 
+        # Расчет количества токенов для промпта (запрос к модели)
+        prompt_tokens = token_utils.token_counter.count_openai_messages_tokens(
+            user_context, model_name
+        )
+
         reply = await models_config.ask_gpt51_with_web_search(
             enable_web_search=True,
             context_history=user_context,
         )
+
+        # Расчет количества токенов для ответа модели
+        response_tokens = token_utils.token_counter.count_openai_tokens(
+            reply, model_name
+        )
+
+        # Расчет стоимости на основе токенов
+        cost_per_prompt = COST_PER_PROMPT.get("chat", 0)
+        cost_per_answer = COST_PER_ANSWER.get("chat", 0)
+        cost = round(
+            (prompt_tokens * cost_per_prompt / 1000000) +
+            (response_tokens * cost_per_answer / 1000000)
+        )
+        if cost == 0:
+            cost = 1
 
         # Обновляем контекст: добавляем и запрос, и ответ
         user_contexts[user_id]["chat"].append(
@@ -927,7 +972,7 @@ async def handle_chat_mode(
             giftcoins,
             "chat",
             user_message,
-            reply,  # Сохраняем оригинальный ответ в логах
+            f"{reply}, tokens (in/out): {prompt_tokens}/{response_tokens}",
         )
     except Exception as e:
         # LOGGING ====================
