@@ -70,24 +70,24 @@ def get_token_limit(model_name: str) -> int:
 
 # Maximum cost per message
 COST_PER_MESSAGE = {
-    "chat": 7,
-    "ai_file": 7,
+    "chat": 5,
+    "ai_file": 5,
     "image": 5,
     "edit": 6,
 }
 
 # Cost per user's prompt tokens (per 1000000 tokens)
 COST_PER_PROMPT = {
-    "chat": 2,
-    "ai_file": 2,
+    "chat": 20,
+    "ai_file": 20,
     "image": 5,
     "edit": 6,
 }
 
 # Cost per ai model's answer tokens (per 1000000 tokens)
 COST_PER_ANSWER = {
-    "chat": 14,
-    "ai_file": 14,
+    "chat": 154,
+    "ai_file": 154,
     "image": 5,
     "edit": 6,
 }
